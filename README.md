@@ -1,4 +1,3 @@
-```markdown
 # Poly-to-Pro (P2P): The Competency Alignment Validator
 
 ![Status](https://img.shields.io/badge/Status-Prototype-orange)
@@ -125,7 +124,5 @@ npm start
 **Sim Chung Boon Larry**
 
 * *Submitted for ITI123 Generative AI & Deep Learning Capstone*
-
-```
 
 ```
