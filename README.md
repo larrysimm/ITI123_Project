@@ -1,3 +1,4 @@
+```markdown
 # Poly-to-Pro (P2P): The Competency Alignment Validator
 
 ![Status](https://img.shields.io/badge/Status-Prototype-orange)
