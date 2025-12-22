@@ -60,8 +60,8 @@ graph LR
         end
 
         subgraph AGENTS [2. The Validator Engine]
-            MGR[😠 Manager Agent\n(Checks SkillsFuture Keywords)]
-            COACH[🤓 Coach Agent\n(Checks STAR Structure)]
+            MGR["😠 Manager Agent\n(Checks SkillsFuture Keywords)"]
+            COACH["🤓 Coach Agent\n(Checks STAR Structure)"]
         end
         
         RESULT[🏆 Final Model Answer]
@@ -121,7 +121,7 @@ npm start
 
 ## 👨‍💻 Author
 
-**Sim Chung Boon Larry**
+**Larry Sim**
 
 * *Submitted for ITI123 Generative AI & Deep Learning Capstone*
 
