@@ -1,8 +1,3 @@
-Here is a clean, professional **README.md** focused on introducing the application effectively.
-
-You can copy-paste this directly into your GitHub repository.
-
-```markdown
 # Poly-to-Pro (P2P): The Competency Alignment Validator
 
 ![Status](https://img.shields.io/badge/Status-Prototype-orange)
