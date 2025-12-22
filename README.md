@@ -1,16 +1,3 @@
-Here is the complete, updated **Project Proposal** formatted in Markdown.
-
-I have integrated all the changes we discussed:
-
-* **New Title:** *The Competency Alignment Validator*
-* **Updated Diagram:** The version with the Sidebar logic.
-* **Refined Architecture:** Including the specific Tech Stack (React, LangChain, Railway/Vercel).
-* **Cleaned Up Flow:** Removed the duplicate image issue.
-
-You can copy this entire block into a `.md` file or convert it directly to PDF/Word for submission.
-
----
-
 # Project Proposal
 
 **Project Title:** Poly-to-Pro (P2P): The Competency Alignment Validator
