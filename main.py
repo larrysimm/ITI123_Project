@@ -1,13 +1,12 @@
 import os
-from typing import List, Optional
+import sqlite3
 from dotenv import load_dotenv
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# --- UPDATED IMPORTS FOR GOOGLE GEMINI ---
-# --- UPDATED IMPORTS FOR LANGCHAIN v0.1+ ---
+# LangChain Imports
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -16,41 +15,33 @@ from langchain_core.output_parsers import StrOutputParser
 from pypdf import PdfReader
 import io
 
-# 1. SETUP & CONFIGURATION
-# ---------------------------------------------------------
+# Database Init
+import database
+
+# 1. SETUP
 load_dotenv()
+app = FastAPI(title="Poly-to-Pro (P2P)", version="2.0.0")
 
-# Verify API Key
-if not os.getenv("GOOGLE_API_KEY"):
-    print("⚠️ WARNING: GOOGLE_API_KEY not found in environment variables.")
+# Auto-build database on startup
+if not os.path.exists("skills.db"):
+    database.init_db()
 
-app = FastAPI(
-    title="Poly-to-Pro (P2P) API",
-    description="Dual-Agent Interview Validator Backend (Powered by Gemini)",
-    version="1.0.0"
-)
-
-# CORS - Allow your React App to talk to this Backend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, change to your frontend URL
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- INITIALIZE GEMINI LLM ---
-# We use 'gemini-1.5-flash' for speed (low latency < 8s) and good reasoning.
-# You can also use 'gemini-1.5-pro' for higher quality but slightly slower speed.
+# Initialize Gemini
 llm = ChatGoogleGenerativeAI(
     model="gemini-1.5-flash",
     temperature=0.2,
-    convert_system_message_to_human=True # Helps with some specific prompting nuances
+    google_api_key=os.getenv("GOOGLE_API_KEY")
 )
 
-
-# 2. DATA MODELS (Pydantic)
-# ---------------------------------------------------------
+# 2. MODELS
 class AnalyzeRequest(BaseModel):
     student_answer: str
     question: str
@@ -62,155 +53,144 @@ class AnalyzeResponse(BaseModel):
     coach_feedback: str
     model_answer: str
 
-
-# 3. HELPER FUNCTIONS
-# ---------------------------------------------------------
-def extract_text_from_pdf(file_bytes: bytes) -> str:
-    """Extracts raw text from a PDF file."""
-    try:
-        reader = PdfReader(io.BytesIO(file_bytes))
-        text = ""
-        for page in reader.pages:
-            text += page.extract_text() or ""
-        return text
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid PDF: {str(e)}")
-
-def get_skills_context(role: str) -> str:
+# 3. HELPER: THE "FULL CONTEXT" RETRIEVER
+def get_full_role_context(role: str) -> str:
     """
-    Simulates the RAG Retrieval Step.
+    Queries all 5 tables to build a massive context profile for the role.
     """
-    # Mock Database - In production, this queries ChromaDB
-    skills_db = {
-        "Audit Associate": (
-            "Required Skills: Financial Reconciliation, Regulatory Compliance (SFRS), "
-            "Data Analytics (Excel/Tableau), Internal Controls, Audit Documentation."
-        ),
-        "Software Engineer": (
-            "Required Skills: CI/CD Pipelines, RESTful APIs, Cloud Infrastructure (AWS/GCP), "
-            "Agile Scrum, Version Control (Git), Unit Testing."
-        ),
-    }
+    db_file = "skills.db"
+    conn = sqlite3.connect(db_file)
+    cursor = conn.cursor()
     
-    return skills_db.get(role, "Required Skills: Professional Communication, Industry Standard Terminology, Problem Solving.")
+    # A. Get Role Description & Expectations
+    cursor.execute("SELECT description, expectations FROM role_descriptions WHERE role = ?", (role,))
+    desc_row = cursor.fetchone()
+    
+    # B. Get Top 5 Key Tasks
+    cursor.execute("SELECT task FROM role_tasks WHERE role = ? LIMIT 5", (role,))
+    tasks = [r[0] for r in cursor.fetchall()]
+    
+    # C. Get Top 10 Skills with Descriptions
+    # Join role_skills with skill_definitions
+    query = """
+        SELECT s.title, s.description 
+        FROM role_skills rs
+        JOIN skill_definitions s ON rs.skill_code = s.skill_code
+        WHERE rs.role = ?
+        LIMIT 10
+    """
+    cursor.execute(query, (role,))
+    skills = cursor.fetchall()
+    
+    conn.close()
+    
+    # D. Format the Context for the AI
+    if not desc_row:
+        return f"Warning: No official data found for role '{role}'."
+        
+    context = f"""
+    OFFICIAL JOB PROFILE: {role}
+    --------------------------------
+    DESCRIPTION: {desc_row[0]}
+    
+    PERFORMANCE EXPECTATIONS:
+    {desc_row[1]}
+    
+    KEY TASKS (Daily Duties):
+    """
+    for t in tasks:
+        context += f"- {t}\n"
+        
+    context += "\nREQUIRED COMPETENCIES (SkillsFuture):\n"
+    for title, desc in skills:
+        context += f"- {title}: {desc}\n"
+        
+    return context
 
-
-# 4. AGENT DEFINITIONS (LangChain)
-# ---------------------------------------------------------
-
-# --- AGENT A: THE HIRING MANAGER (Technical Validator) ---
+# 4. AGENTS
 manager_prompt = ChatPromptTemplate.from_template(
     """
-    You are a strict Hiring Manager interviewing a candidate for the role of {role}.
+    You are a strict Hiring Manager for the role of {role}.
     
-    CONTEXT DATA (Government Framework):
+    OFFICIAL GOVERNMENT DATA FOR THIS ROLE:
     {skills_context}
     
-    CANDIDATE RESUME SUMMARY:
+    CANDIDATE RESUME:
     {resume_text}
     
     INTERVIEW QUESTION:
     {question}
     
-    CANDIDATE ANSWER:
+    ANSWER:
     {student_answer}
     
-    YOUR TASK:
-    Perform a Technical Audit of the answer.
-    1. Check if the candidate used the specific keywords from the CONTEXT DATA.
-    2. Identify if they used vague language (e.g., "checked the numbers") instead of industry terms (e.g., "Reconciliation").
-    3. Be critical. Do not give praise. Only point out the GAPS.
+    TASK:
+    1. Compare the candidate's answer against the "KEY TASKS" and "COMPETENCIES" above.
+    2. Did they describe tasks that match the official job description?
+    3. Did they use the correct terminology from the Competencies list?
     
-    OUTPUT FORMAT:
-    - MISSING KEYWORDS: [List specific terms they missed]
-    - TECHNICAL CRITIQUE: [2-3 sentences explaining why the answer is technically weak]
+    OUTPUT:
+    - KEYWORDS MISSED: [List specific terms]
+    - TECHNICAL GAPS: [Explain if their answer fits the official job description or if it sounds too generic]
     """
 )
 manager_chain = manager_prompt | llm | StrOutputParser()
 
-
-# --- AGENT B: THE CAREER COACH (Behavioral Strategist) ---
 coach_prompt = ChatPromptTemplate.from_template(
     """
-    You are a supportive Career Coach helping a Polytechnic graduate.
+    You are a Career Coach.
     
-    INTERVIEW QUESTION:
-    {question}
-    
-    CANDIDATE ANSWER:
-    {student_answer}
-    
-    TECHNICAL CRITIQUE (From Hiring Manager):
+    MANAGER'S CRITIQUE:
     {manager_critique}
     
-    YOUR TASK:
-    1. Acknowledge the Manager's critique but focus on STRUCTURE.
-    2. Rewrite the candidate's answer using the STAR Method (Situation, Task, Action, Result).
-    3. You MUST incorporate the missing technical keywords identified by the Manager.
-    4. Do NOT invent new experiences. Use the facts provided in the candidate's answer.
+    STUDENT ANSWER:
+    {student_answer}
     
-    OUTPUT FORMAT:
-    - STAR BREAKDOWN: (Briefly label S, T, A, R)
-    - GOLDEN MODEL ANSWER: (The perfect paragraph to say in the interview)
+    TASK:
+    Rewrite the student's answer using the STAR Method. 
+    Crucially, inject the 'KEY TASKS' terminology identified by the Manager to make it sound professional.
+    
+    OUTPUT:
+    - STAR IMPROVEMENT:
+    - MODEL ANSWER:
     """
 )
 coach_chain = coach_prompt | llm | StrOutputParser()
 
-
-# 5. API ENDPOINTS
-# ---------------------------------------------------------
-
-@app.get("/")
-async def root():
-    return {"status": "active", "system": "Poly-to-Pro Validator Engine (Gemini)"}
-
+# 5. ENDPOINTS
 @app.post("/upload_resume")
 async def upload_resume(file: UploadFile = File(...)):
-    """
-    Receives a PDF, extracts text, and returns it to the frontend.
-    """
-    if file.content_type != "application/pdf":
-        raise HTTPException(status_code=400, detail="File must be a PDF")
-    
     content = await file.read()
-    text = extract_text_from_pdf(content)
-    
-    # Return first 2000 chars to avoid token limits
-    return {"filename": file.filename, "extracted_text": text[:2000]}
+    reader = PdfReader(io.BytesIO(content))
+    text = "".join([p.extract_text() for p in reader.pages])
+    return {"filename": file.filename, "extracted_text": text[:3000]}
 
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_answer(request: AnalyzeRequest):
-    """
-    The Core Dual-Agent Logic.
-    """
+    # 1. Get massive context
+    full_context = get_full_role_context(request.target_role)
     
-    # Step 1: Retrieve Context (Simulated RAG)
-    skills_context = get_skills_context(request.target_role)
-    
-    # Step 2: Run Agent A (Manager)
-    manager_feedback = await manager_chain.ainvoke({
+    # 2. Manager Agent
+    manager_res = await manager_chain.ainvoke({
         "role": request.target_role,
-        "skills_context": skills_context,
+        "skills_context": full_context,
         "resume_text": request.resume_text,
         "question": request.question,
         "student_answer": request.student_answer
     })
     
-    # Step 3: Run Agent B (Coach)
-    coach_feedback_raw = await coach_chain.ainvoke({
-        "question": request.question,
-        "student_answer": request.student_answer,
-        "manager_critique": manager_feedback
+    # 3. Coach Agent
+    coach_res = await coach_chain.ainvoke({
+        "manager_critique": manager_res,
+        "student_answer": request.student_answer
     })
     
     return AnalyzeResponse(
-        manager_critique=manager_feedback,
-        coach_feedback=coach_feedback_raw,
-        model_answer="Refer to Coach Feedback for the Golden Answer." 
+        manager_critique=manager_res,
+        coach_feedback=coach_res,
+        model_answer="See Coach Feedback"
     )
 
-# 6. RUNNER
-# ---------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

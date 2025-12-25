@@ -7,3 +7,4 @@ langchain-google-genai
 langchain-community
 pypdf
 python-multipart
+pandas
