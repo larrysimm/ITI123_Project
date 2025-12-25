@@ -7,9 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 # --- UPDATED IMPORTS FOR GOOGLE GEMINI ---
+# --- UPDATED IMPORTS FOR LANGCHAIN v0.1+ ---
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.prompts import ChatPromptTemplate
-from langchain.schema.output_parser import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 
 # PDF Parsing
 from pypdf import PdfReader
