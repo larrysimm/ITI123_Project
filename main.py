@@ -6,11 +6,10 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# LangChain Imports
-from langchain_openai import ChatOpenAI
+# --- UPDATED IMPORTS FOR GOOGLE GEMINI ---
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema.output_parser import StrOutputParser
-from langchain.schema.runnable import RunnablePassthrough
 
 # PDF Parsing
 from pypdf import PdfReader
@@ -21,27 +20,32 @@ import io
 load_dotenv()
 
 # Verify API Key
-if not os.getenv("OPENAI_API_KEY"):
-    print("⚠️ WARNING: OPENAI_API_KEY not found in environment variables.")
+if not os.getenv("GOOGLE_API_KEY"):
+    print("⚠️ WARNING: GOOGLE_API_KEY not found in environment variables.")
 
 app = FastAPI(
     title="Poly-to-Pro (P2P) API",
-    description="Dual-Agent Interview Validator Backend",
+    description="Dual-Agent Interview Validator Backend (Powered by Gemini)",
     version="1.0.0"
 )
 
 # CORS - Allow your React App to talk to this Backend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with ["http://localhost:3000"]
+    allow_origins=["*"],  # In production, change to your frontend URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Initialize LLM (GPT-4o or GPT-3.5-Turbo)
-llm = ChatOpenAI(model="gpt-4o", temperature=0.2) 
-# Note: Low temperature = more deterministic/strict for validation.
+# --- INITIALIZE GEMINI LLM ---
+# We use 'gemini-1.5-flash' for speed (low latency < 8s) and good reasoning.
+# You can also use 'gemini-1.5-pro' for higher quality but slightly slower speed.
+llm = ChatGoogleGenerativeAI(
+    model="gemini-1.5-flash",
+    temperature=0.2,
+    convert_system_message_to_human=True # Helps with some specific prompting nuances
+)
 
 
 # 2. DATA MODELS (Pydantic)
@@ -74,22 +78,19 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
 def get_skills_context(role: str) -> str:
     """
     Simulates the RAG Retrieval Step.
-    In the final version, this would query your ChromaDB/VectorStore.
-    For now, we return hardcoded SkillsFuture data for testing.
     """
-    # Mock Database
+    # Mock Database - In production, this queries ChromaDB
     skills_db = {
         "Audit Associate": (
-            "Required Skills: Financial Reconciliation, Regulatory Compliance, "
-            "Data Analytics (Excel/Tableau), Risk Assessment, Audit Trail Documentation."
+            "Required Skills: Financial Reconciliation, Regulatory Compliance (SFRS), "
+            "Data Analytics (Excel/Tableau), Internal Controls, Audit Documentation."
         ),
         "Software Engineer": (
-            "Required Skills: CI/CD Pipelines, Unit Testing, API Development (REST), "
-            "Git Workflow, Agile Methodology, System Architecture."
+            "Required Skills: CI/CD Pipelines, RESTful APIs, Cloud Infrastructure (AWS/GCP), "
+            "Agile Scrum, Version Control (Git), Unit Testing."
         ),
     }
     
-    # Default fallback if role not found
     return skills_db.get(role, "Required Skills: Professional Communication, Industry Standard Terminology, Problem Solving.")
 
 
@@ -160,13 +161,12 @@ coach_chain = coach_prompt | llm | StrOutputParser()
 
 @app.get("/")
 async def root():
-    return {"status": "active", "system": "Poly-to-Pro Validator Engine"}
+    return {"status": "active", "system": "Poly-to-Pro Validator Engine (Gemini)"}
 
 @app.post("/upload_resume")
 async def upload_resume(file: UploadFile = File(...)):
     """
     Receives a PDF, extracts text, and returns it to the frontend.
-    The frontend will store this in its 'Context Engine' state.
     """
     if file.content_type != "application/pdf":
         raise HTTPException(status_code=400, detail="File must be a PDF")
@@ -174,23 +174,19 @@ async def upload_resume(file: UploadFile = File(...)):
     content = await file.read()
     text = extract_text_from_pdf(content)
     
-    # Return first 2000 chars to avoid token limits in prototype
+    # Return first 2000 chars to avoid token limits
     return {"filename": file.filename, "extracted_text": text[:2000]}
 
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_answer(request: AnalyzeRequest):
     """
     The Core Dual-Agent Logic.
-    1. Retrieve Skills Context (RAG).
-    2. Run Manager Agent (Technical Check).
-    3. Run Coach Agent (Structure Fix).
     """
     
     # Step 1: Retrieve Context (Simulated RAG)
     skills_context = get_skills_context(request.target_role)
     
     # Step 2: Run Agent A (Manager)
-    # We pass the raw input into the Manager Chain
     manager_feedback = await manager_chain.ainvoke({
         "role": request.target_role,
         "skills_context": skills_context,
@@ -200,15 +196,11 @@ async def analyze_answer(request: AnalyzeRequest):
     })
     
     # Step 3: Run Agent B (Coach)
-    # Coach takes the Manager's output as input
     coach_feedback_raw = await coach_chain.ainvoke({
         "question": request.question,
         "student_answer": request.student_answer,
         "manager_critique": manager_feedback
     })
-    
-    # Simple post-processing to split the Coach's output if needed
-    # For now, we just return the full text
     
     return AnalyzeResponse(
         manager_critique=manager_feedback,
@@ -220,5 +212,4 @@ async def analyze_answer(request: AnalyzeRequest):
 # ---------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
-    # Reload=True allows you to change code without restarting server
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
