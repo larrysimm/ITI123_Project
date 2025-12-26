@@ -176,21 +176,18 @@ async def upload_resume(file: UploadFile = File(...)):
 async def analyze_stream(request: AnalyzeRequest):
     async def event_generator():
         try:
-            # --- STEP 1: Ingest Context ---
-            yield json.dumps({"type": "step", "step_id": 1, "message": "Ingesting resume & role context..."}) + "\n"
+            # --- STEP 1 ---
+            print("LOG: Starting Step 1 (Ingest)")
+            yield json.dumps({"type": "step", "step_id": 1, "message": "Ingesting resume..."}) + "\n"
             await asyncio.sleep(0.5) 
-
-            # CRITICAL FIX: Run the synchronous DB call in a separate thread so it doesn't block
+            
             loop = asyncio.get_event_loop()
             full_context = await loop.run_in_executor(None, get_full_role_context, request.target_role)
 
-            # --- STEP 2: Manager Analysis ---
+            # --- STEP 2 ---
+            print("LOG: Starting Step 2 (Manager Agent)")
             yield json.dumps({"type": "step", "step_id": 2, "message": "Analyzing STAR structure..."}) + "\n"
             
-            # Check if API Key exists before calling Gemini
-            if not os.getenv("GOOGLE_API_KEY"):
-                raise Exception("Missing GOOGLE_API_KEY in .env file")
-
             manager_res = await manager_chain.ainvoke({
                 "role": request.target_role,
                 "skills_context": full_context,
@@ -198,16 +195,20 @@ async def analyze_stream(request: AnalyzeRequest):
                 "question": request.question,
                 "student_answer": request.student_answer
             })
+            print("LOG: Manager Agent Finished")
 
-            # --- STEP 3: Coach Refinement ---
+            # --- STEP 3 ---
+            print("LOG: Starting Step 3 (Coach Agent)")
             yield json.dumps({"type": "step", "step_id": 3, "message": "Cross-referencing SkillsFuture..."}) + "\n"
             
             coach_res = await coach_chain.ainvoke({
                 "manager_critique": manager_res,
                 "student_answer": request.student_answer
             })
+            print("LOG: Coach Agent Finished")
 
-            # --- STEP 4: Finalizing ---
+            # --- STEP 4 ---
+            print("LOG: Starting Step 4 (Finalizing)")
             yield json.dumps({"type": "step", "step_id": 4, "message": "Drafting final feedback..."}) + "\n"
             
             final_response = {
@@ -216,10 +217,10 @@ async def analyze_stream(request: AnalyzeRequest):
                 "model_answer": "See Coach Feedback"
             }
             yield json.dumps({"type": "result", "data": final_response}) + "\n"
+            print("LOG: Stream Complete")
             
         except Exception as e:
-            # Send the specific error message to the frontend
-            print(f"ERROR: {str(e)}") # Print to backend terminal
+            print(f"CRITICAL ERROR IN STREAM: {str(e)}") # <--- CHECK YOUR TERMINAL FOR THIS
             yield json.dumps({"type": "error", "message": str(e)}) + "\n"
 
     return StreamingResponse(event_generator(), media_type="application/x-ndjson")
