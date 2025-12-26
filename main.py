@@ -174,25 +174,23 @@ async def upload_resume(file: UploadFile = File(...)):
 # --- NEW: STREAMING ENDPOINT ---
 @app.post("/analyze_stream")
 async def analyze_stream(request: AnalyzeRequest):
-    """
-    This endpoint yields JSON updates line-by-line so the frontend
-    can show the "Thinking UI" progress bar.
-    """
     async def event_generator():
         try:
             # --- STEP 1: Ingest Context ---
             yield json.dumps({"type": "step", "step_id": 1, "message": "Ingesting resume & role context..."}) + "\n"
-            
-            # (Simulate a tiny delay so the user sees the step check off)
             await asyncio.sleep(0.5) 
-            
-            # Fetch DB context (Synchronous DB call wrapped in async function)
-            full_context = get_full_role_context(request.target_role)
+
+            # CRITICAL FIX: Run the synchronous DB call in a separate thread so it doesn't block
+            loop = asyncio.get_event_loop()
+            full_context = await loop.run_in_executor(None, get_full_role_context, request.target_role)
 
             # --- STEP 2: Manager Analysis ---
             yield json.dumps({"type": "step", "step_id": 2, "message": "Analyzing STAR structure..."}) + "\n"
             
-            # Run LangChain Manager Agent
+            # Check if API Key exists before calling Gemini
+            if not os.getenv("GOOGLE_API_KEY"):
+                raise Exception("Missing GOOGLE_API_KEY in .env file")
+
             manager_res = await manager_chain.ainvoke({
                 "role": request.target_role,
                 "skills_context": full_context,
@@ -204,7 +202,6 @@ async def analyze_stream(request: AnalyzeRequest):
             # --- STEP 3: Coach Refinement ---
             yield json.dumps({"type": "step", "step_id": 3, "message": "Cross-referencing SkillsFuture..."}) + "\n"
             
-            # Run LangChain Coach Agent
             coach_res = await coach_chain.ainvoke({
                 "manager_critique": manager_res,
                 "student_answer": request.student_answer
@@ -212,9 +209,7 @@ async def analyze_stream(request: AnalyzeRequest):
 
             # --- STEP 4: Finalizing ---
             yield json.dumps({"type": "step", "step_id": 4, "message": "Drafting final feedback..."}) + "\n"
-            await asyncio.sleep(0.5) 
-
-            # --- SEND RESULT ---
+            
             final_response = {
                 "manager_critique": manager_res,
                 "coach_feedback": coach_res,
@@ -223,7 +218,8 @@ async def analyze_stream(request: AnalyzeRequest):
             yield json.dumps({"type": "result", "data": final_response}) + "\n"
             
         except Exception as e:
-            # Handle errors gracefully in the stream
+            # Send the specific error message to the frontend
+            print(f"ERROR: {str(e)}") # Print to backend terminal
             yield json.dumps({"type": "error", "message": str(e)}) + "\n"
 
     return StreamingResponse(event_generator(), media_type="application/x-ndjson")
