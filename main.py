@@ -143,6 +143,38 @@ class AnalyzeRequest(BaseModel):
     resume_text: str
 
 # 6. ENDPOINTS
+@app.get("/")
+async def root():
+    return {
+        "message": "Poly-to-Pro API is running!",
+        "docs": "/docs",
+        "status": "OK"
+    }
+
+@app.get("/questions")
+def get_questions():
+    """
+    Fetches the list of questions from the database.
+    These were populated from your questions.json file.
+    """
+    try:
+        # Connect to the DB
+        conn = sqlite3.connect("skills.db")
+        cursor = conn.cursor()
+        
+        # Select all questions
+        cursor.execute("SELECT id, question_text FROM saved_questions ORDER BY id ASC")
+        rows = cursor.fetchall()
+        
+        # Convert to JSON-friendly list
+        questions = [{"id": r[0], "text": r[1]} for r in rows]
+        
+        conn.close()
+        return questions
+    except Exception as e:
+        print(f"Error fetching questions: {e}")
+        return []
+    
 @app.post("/upload_resume")
 async def upload_resume(file: UploadFile = File(...)):
     content = await file.read()
