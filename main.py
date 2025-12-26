@@ -25,8 +25,7 @@ import database
 load_dotenv()
 app = FastAPI(title="Poly-to-Pro", version="3.0.0")
 
-if not os.path.exists("skills.db"):
-    database.init_db()
+database.init_db()
 
 app.add_middleware(
     CORSMiddleware,
