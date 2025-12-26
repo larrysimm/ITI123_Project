@@ -135,6 +135,14 @@ coach_prompt = ChatPromptTemplate.from_template(
 )
 
 # 5. ENDPOINTS
+@app.get("/")
+async def root():
+    return {
+        "message": "Poly-to-Pro API is running!",
+        "docs": "/docs",
+        "status": "OK"
+    }
+
 @app.post("/upload_resume")
 async def upload_resume(file: UploadFile = File(...)):
     content = await file.read()
