@@ -1,0 +1,43 @@
+[
+  {
+    "text": "Tell me about a project where you faced a technical problem you couldn’t solve immediately.",
+    "category": "Problem-solving"
+  },
+  {
+    "text": "Describe a time you had to learn a new technology or tool quickly.",
+    "category": "Adaptability"
+  },
+  {
+    "text": "Tell me about a time you worked in a team and there was a disagreement or conflict.",
+    "category": "Teamwork"
+  },
+  {
+    "text": "Describe a situation where your initial solution didn’t work. What did you do next?",
+    "category": "Resilience"
+  },
+  {
+    "text": "Tell me about a time you had to manage multiple deadlines or tasks.",
+    "category": "Time management"
+  },
+    {
+    "text": "Describe a project where you took ownership of a feature or module.",
+    "category": "Responsibility"
+  },
+    {
+    "text": "Tell me about a time you received critical feedback. How did you respond?",
+    "category": "Professionalism"
+  },
+    {
+    "text": "Describe a situation where something went wrong close to a deadline.",
+    "category": "Decision-making"
+  },
+    {
+    "text": "Tell me about a time you helped someone else solve a problem.",
+    "category": "Collaboration"
+  },
+    {
+    "text": "Tell me about a project you are most proud of and why.",
+    "category": "Achievement"
+  }
+
+]
