@@ -188,13 +188,23 @@ async def analyze_stream(request: AnalyzeRequest):
             print("LOG: Starting Step 2 (Manager Agent)")
             yield json.dumps({"type": "step", "step_id": 2, "message": "Analyzing STAR structure..."}) + "\n"
             
-            manager_res = await manager_chain.ainvoke({
-                "role": request.target_role,
-                "skills_context": full_context,
-                "resume_text": request.resume_text,
-                "question": request.question,
-                "student_answer": request.student_answer
-            })
+            manager_res = ""
+            for attempt in range(3): # Try 3 times
+                try:
+                    manager_res = await manager_chain.ainvoke({
+                        "role": request.target_role,
+                        "skills_context": full_context,
+                        "resume_text": request.resume_text,
+                        "question": request.question,
+                        "student_answer": request.student_answer
+                    })
+                    break # Success! Exit loop
+                except ResourceExhausted:
+                    print("Quota hit. Waiting 15s...")
+                    yield json.dumps({"type": "step", "step_id": 2, "message": "Quota hit. Cooling down (15s)..."}) + "\n"
+                    time.sleep(15) # Wait 15 seconds before retrying
+                except Exception as e:
+                    raise e # Throw other errors immediately
             print("LOG: Manager Agent Finished")
 
             # --- STEP 3 ---
