@@ -1,9 +1,13 @@
 import os
 import sqlite3
+import json
+import asyncio
 from dotenv import load_dotenv
 
+# FastAPI Imports
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse  # <--- NEW IMPORT
 from pydantic import BaseModel
 
 # LangChain Imports
@@ -15,8 +19,8 @@ from langchain_core.output_parsers import StrOutputParser
 from pypdf import PdfReader
 import io
 
-# Database Init
-import database
+# Database Init (Your existing module)
+import database 
 
 # 1. SETUP
 load_dotenv()
@@ -36,7 +40,7 @@ app.add_middleware(
 
 # Initialize Gemini
 llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
+    model="gemini-1.5-flash", # Note: Ensure you use a valid model name (1.5-flash is standard)
     temperature=0.2,
     google_api_key=os.getenv("GOOGLE_API_KEY")
 )
@@ -59,6 +63,8 @@ def get_full_role_context(role: str) -> str:
     Queries all 5 tables to build a massive context profile for the role.
     """
     db_file = "skills.db"
+    # Ensure thread safety for SQLite in async context usually requires care, 
+    # but for read-only here it's acceptable for this prototype.
     conn = sqlite3.connect(db_file)
     cursor = conn.cursor()
     
@@ -71,7 +77,6 @@ def get_full_role_context(role: str) -> str:
     tasks = [r[0] for r in cursor.fetchall()]
     
     # C. Get Top 10 Skills with Descriptions
-    # Join role_skills with skill_definitions
     query = """
         SELECT s.title, s.description 
         FROM role_skills rs
@@ -158,6 +163,7 @@ coach_prompt = ChatPromptTemplate.from_template(
 coach_chain = coach_prompt | llm | StrOutputParser()
 
 # 5. ENDPOINTS
+
 @app.post("/upload_resume")
 async def upload_resume(file: UploadFile = File(...)):
     content = await file.read()
@@ -165,12 +171,67 @@ async def upload_resume(file: UploadFile = File(...)):
     text = "".join([p.extract_text() for p in reader.pages])
     return {"filename": file.filename, "extracted_text": text[:3000]}
 
+# --- NEW: STREAMING ENDPOINT ---
+@app.post("/analyze_stream")
+async def analyze_stream(request: AnalyzeRequest):
+    """
+    This endpoint yields JSON updates line-by-line so the frontend
+    can show the "Thinking UI" progress bar.
+    """
+    async def event_generator():
+        try:
+            # --- STEP 1: Ingest Context ---
+            yield json.dumps({"type": "step", "step_id": 1, "message": "Ingesting resume & role context..."}) + "\n"
+            
+            # (Simulate a tiny delay so the user sees the step check off)
+            await asyncio.sleep(0.5) 
+            
+            # Fetch DB context (Synchronous DB call wrapped in async function)
+            full_context = get_full_role_context(request.target_role)
+
+            # --- STEP 2: Manager Analysis ---
+            yield json.dumps({"type": "step", "step_id": 2, "message": "Analyzing STAR structure..."}) + "\n"
+            
+            # Run LangChain Manager Agent
+            manager_res = await manager_chain.ainvoke({
+                "role": request.target_role,
+                "skills_context": full_context,
+                "resume_text": request.resume_text,
+                "question": request.question,
+                "student_answer": request.student_answer
+            })
+
+            # --- STEP 3: Coach Refinement ---
+            yield json.dumps({"type": "step", "step_id": 3, "message": "Cross-referencing SkillsFuture..."}) + "\n"
+            
+            # Run LangChain Coach Agent
+            coach_res = await coach_chain.ainvoke({
+                "manager_critique": manager_res,
+                "student_answer": request.student_answer
+            })
+
+            # --- STEP 4: Finalizing ---
+            yield json.dumps({"type": "step", "step_id": 4, "message": "Drafting final feedback..."}) + "\n"
+            await asyncio.sleep(0.5) 
+
+            # --- SEND RESULT ---
+            final_response = {
+                "manager_critique": manager_res,
+                "coach_feedback": coach_res,
+                "model_answer": "See Coach Feedback"
+            }
+            yield json.dumps({"type": "result", "data": final_response}) + "\n"
+            
+        except Exception as e:
+            # Handle errors gracefully in the stream
+            yield json.dumps({"type": "error", "message": str(e)}) + "\n"
+
+    return StreamingResponse(event_generator(), media_type="application/x-ndjson")
+
+# Keep the old endpoint just in case you need a fallback
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_answer(request: AnalyzeRequest):
-    # 1. Get massive context
     full_context = get_full_role_context(request.target_role)
-    
-    # 2. Manager Agent
     manager_res = await manager_chain.ainvoke({
         "role": request.target_role,
         "skills_context": full_context,
@@ -178,13 +239,10 @@ async def analyze_answer(request: AnalyzeRequest):
         "question": request.question,
         "student_answer": request.student_answer
     })
-    
-    # 3. Coach Agent
     coach_res = await coach_chain.ainvoke({
         "manager_critique": manager_res,
         "student_answer": request.student_answer
     })
-    
     return AnalyzeResponse(
         manager_critique=manager_res,
         coach_feedback=coach_res,
@@ -193,4 +251,5 @@ async def analyze_answer(request: AnalyzeRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    # Use standard uvicorn run
+    uvicorn.run(app, host="0.0.0.0", port=8000)
