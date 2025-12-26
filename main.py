@@ -7,26 +7,27 @@ from dotenv import load_dotenv
 # FastAPI Imports
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse  # <--- NEW IMPORT
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 # LangChain Imports
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_groq import ChatGroq  # <--- NEW IMPORT
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from google.api_core.exceptions import ResourceExhausted # To catch the specific 429 error
 
 # PDF Parsing
 from pypdf import PdfReader
 import io
 
-# Database Init (Your existing module)
+# Database Init
 import database 
 
 # 1. SETUP
 load_dotenv()
-app = FastAPI(title="Poly-to-Pro (P2P)", version="2.0.0")
+app = FastAPI(title="Poly-to-Pro (P2P)", version="2.1.0")
 
-# Auto-build database on startup
 if not os.path.exists("skills.db"):
     database.init_db()
 
@@ -38,132 +39,102 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize Gemini
-llm = ChatGoogleGenerativeAI(
-    model="gemini-2.0-flash-lite", 
+# --- DUAL ENGINE SETUP ---
+
+# Primary: Gemini (Good reasoning, currently exhausted for you)
+gemini_llm = ChatGoogleGenerativeAI(
+    model="gemini-1.5-flash", 
     temperature=0.2,
     google_api_key=os.getenv("GOOGLE_API_KEY")
 )
 
-# 2. MODELS
+# Backup: Groq (Super fast, running Llama 3)
+groq_llm = ChatGroq(
+    model_name="llama3-70b-8192", 
+    temperature=0.2,
+    groq_api_key=os.getenv("GROQ_API_KEY")
+)
+
+# 2. HELPER: SMART FALLBACK EXECUTION
+async def run_chain_with_fallback(prompt_template, inputs, step_name="AI"):
+    """
+    Tries to run the prompt with Gemini. 
+    If it hits a rate limit (429), it switches to Groq (Llama 3).
+    """
+    try:
+        # Try Primary (Gemini)
+        chain = prompt_template | gemini_llm | StrOutputParser()
+        return await chain.ainvoke(inputs)
+    
+    except ResourceExhausted:
+        print(f"⚠️ GEMINI QUOTA HIT during {step_name}. Switching to GROQ...")
+        # Fallback to Secondary (Groq)
+        chain = prompt_template | groq_llm | StrOutputParser()
+        return await chain.ainvoke(inputs)
+        
+    except Exception as e:
+        # If it's a different error (like auth failure), we also try Groq just in case
+        print(f"⚠️ Error in {step_name}: {str(e)}. Retrying with GROQ...")
+        try:
+            chain = prompt_template | groq_llm | StrOutputParser()
+            return await chain.ainvoke(inputs)
+        except Exception as groq_error:
+            # If both fail, then we crash
+            print(f"❌ CRITICAL: Both engines failed. {str(groq_error)}")
+            raise groq_error
+
+# 3. MODELS & DATABASE (Standard Logic)
 class AnalyzeRequest(BaseModel):
     student_answer: str
     question: str
     target_role: str
     resume_text: str
 
-class AnalyzeResponse(BaseModel):
-    manager_critique: str
-    coach_feedback: str
-    model_answer: str
-
-# 3. HELPER: THE "FULL CONTEXT" RETRIEVER
 def get_full_role_context(role: str) -> str:
-    """
-    Queries all 5 tables to build a massive context profile for the role.
-    """
     db_file = "skills.db"
-    # Ensure thread safety for SQLite in async context usually requires care, 
-    # but for read-only here it's acceptable for this prototype.
     conn = sqlite3.connect(db_file)
     cursor = conn.cursor()
-    
-    # A. Get Role Description & Expectations
     cursor.execute("SELECT description, expectations FROM role_descriptions WHERE role = ?", (role,))
     desc_row = cursor.fetchone()
-    
-    # B. Get Top 5 Key Tasks
     cursor.execute("SELECT task FROM role_tasks WHERE role = ? LIMIT 5", (role,))
     tasks = [r[0] for r in cursor.fetchall()]
-    
-    # C. Get Top 10 Skills with Descriptions
-    query = """
-        SELECT s.title, s.description 
-        FROM role_skills rs
-        JOIN skill_definitions s ON rs.skill_code = s.skill_code
-        WHERE rs.role = ?
-        LIMIT 10
-    """
+    query = "SELECT s.title, s.description FROM role_skills rs JOIN skill_definitions s ON rs.skill_code = s.skill_code WHERE rs.role = ? LIMIT 10"
     cursor.execute(query, (role,))
     skills = cursor.fetchall()
-    
     conn.close()
     
-    # D. Format the Context for the AI
-    if not desc_row:
-        return f"Warning: No official data found for role '{role}'."
-        
-    context = f"""
-    OFFICIAL JOB PROFILE: {role}
-    --------------------------------
-    DESCRIPTION: {desc_row[0]}
-    
-    PERFORMANCE EXPECTATIONS:
-    {desc_row[1]}
-    
-    KEY TASKS (Daily Duties):
-    """
-    for t in tasks:
-        context += f"- {t}\n"
-        
-    context += "\nREQUIRED COMPETENCIES (SkillsFuture):\n"
-    for title, desc in skills:
-        context += f"- {title}: {desc}\n"
-        
+    if not desc_row: return f"Warning: No data for '{role}'."
+    context = f"OFFICIAL JOB PROFILE: {role}\nDESC: {desc_row[0]}\nEXPECTATIONS: {desc_row[1]}\nKEY TASKS:\n"
+    for t in tasks: context += f"- {t}\n"
+    context += "\nCOMPETENCIES:\n"
+    for t, d in skills: context += f"- {t}: {d}\n"
     return context
 
-# 4. AGENTS
+# 4. PROMPTS
 manager_prompt = ChatPromptTemplate.from_template(
     """
-    You are a strict Hiring Manager for the role of {role}.
+    You are a strict Hiring Manager for {role}.
+    OFFICIAL DATA: {skills_context}
+    RESUME: {resume_text}
+    QUESTION: {question}
+    ANSWER: {student_answer}
     
-    OFFICIAL GOVERNMENT DATA FOR THIS ROLE:
-    {skills_context}
-    
-    CANDIDATE RESUME:
-    {resume_text}
-    
-    INTERVIEW QUESTION:
-    {question}
-    
-    ANSWER:
-    {student_answer}
-    
-    TASK:
-    1. Compare the candidate's answer against the "KEY TASKS" and "COMPETENCIES" above.
-    2. Did they describe tasks that match the official job description?
-    3. Did they use the correct terminology from the Competencies list?
-    
-    OUTPUT:
-    - KEYWORDS MISSED: [List specific terms]
-    - TECHNICAL GAPS: [Explain if their answer fits the official job description or if it sounds too generic]
+    Identify 2 specific gaps where the candidate failed to match the 'KEY TASKS' or 'COMPETENCIES'.
+    Be concise.
     """
 )
-manager_chain = manager_prompt | llm | StrOutputParser()
 
 coach_prompt = ChatPromptTemplate.from_template(
     """
     You are a Career Coach.
+    MANAGER CRITIQUE: {manager_critique}
+    STUDENT ANSWER: {student_answer}
     
-    MANAGER'S CRITIQUE:
-    {manager_critique}
-    
-    STUDENT ANSWER:
-    {student_answer}
-    
-    TASK:
-    Rewrite the student's answer using the STAR Method. 
-    Crucially, inject the 'KEY TASKS' terminology identified by the Manager to make it sound professional.
-    
-    OUTPUT:
-    - STAR IMPROVEMENT:
-    - MODEL ANSWER:
+    Rewrite the answer using the STAR method to address the critique.
     """
 )
-coach_chain = coach_prompt | llm | StrOutputParser()
 
 # 5. ENDPOINTS
-
 @app.post("/upload_resume")
 async def upload_resume(file: UploadFile = File(...)):
     content = await file.read()
@@ -171,55 +142,47 @@ async def upload_resume(file: UploadFile = File(...)):
     text = "".join([p.extract_text() for p in reader.pages])
     return {"filename": file.filename, "extracted_text": text[:3000]}
 
-# --- NEW: STREAMING ENDPOINT ---
 @app.post("/analyze_stream")
 async def analyze_stream(request: AnalyzeRequest):
     async def event_generator():
         try:
             # --- STEP 1 ---
-            print("LOG: Starting Step 1 (Ingest)")
-            yield json.dumps({"type": "step", "step_id": 1, "message": "Ingesting resume..."}) + "\n"
+            yield json.dumps({"type": "step", "step_id": 1, "message": "Ingesting context..."}) + "\n"
             await asyncio.sleep(0.5) 
             
             loop = asyncio.get_event_loop()
             full_context = await loop.run_in_executor(None, get_full_role_context, request.target_role)
 
-            # --- STEP 2 ---
-            print("LOG: Starting Step 2 (Manager Agent)")
-            yield json.dumps({"type": "step", "step_id": 2, "message": "Analyzing STAR structure..."}) + "\n"
+            # --- STEP 2 (With Smart Fallback) ---
+            yield json.dumps({"type": "step", "step_id": 2, "message": "Analyzing gaps..."}) + "\n"
             
-            manager_res = ""
-            for attempt in range(3): # Try 3 times
-                try:
-                    manager_res = await manager_chain.ainvoke({
-                        "role": request.target_role,
-                        "skills_context": full_context,
-                        "resume_text": request.resume_text,
-                        "question": request.question,
-                        "student_answer": request.student_answer
-                    })
-                    break # Success! Exit loop
-                except ResourceExhausted:
-                    print("Quota hit. Waiting 15s...")
-                    yield json.dumps({"type": "step", "step_id": 2, "message": "Quota hit. Cooling down (15s)..."}) + "\n"
-                    time.sleep(15) # Wait 15 seconds before retrying
-                except Exception as e:
-                    raise e # Throw other errors immediately
-            print("LOG: Manager Agent Finished")
+            # We call our new helper function instead of calling Gemini directly
+            manager_res = await run_chain_with_fallback(
+                manager_prompt, 
+                {
+                    "role": request.target_role,
+                    "skills_context": full_context,
+                    "resume_text": request.resume_text,
+                    "question": request.question,
+                    "student_answer": request.student_answer
+                },
+                step_name="Manager Analysis"
+            )
 
-            # --- STEP 3 ---
-            print("LOG: Starting Step 3 (Coach Agent)")
-            yield json.dumps({"type": "step", "step_id": 3, "message": "Cross-referencing SkillsFuture..."}) + "\n"
+            # --- STEP 3 (With Smart Fallback) ---
+            yield json.dumps({"type": "step", "step_id": 3, "message": "Drafting feedback..."}) + "\n"
             
-            coach_res = await coach_chain.ainvoke({
-                "manager_critique": manager_res,
-                "student_answer": request.student_answer
-            })
-            print("LOG: Coach Agent Finished")
+            coach_res = await run_chain_with_fallback(
+                coach_prompt,
+                {
+                    "manager_critique": manager_res,
+                    "student_answer": request.student_answer
+                },
+                step_name="Coach Refinement"
+            )
 
             # --- STEP 4 ---
-            print("LOG: Starting Step 4 (Finalizing)")
-            yield json.dumps({"type": "step", "step_id": 4, "message": "Drafting final feedback..."}) + "\n"
+            yield json.dumps({"type": "step", "step_id": 4, "message": "Finalizing..."}) + "\n"
             
             final_response = {
                 "manager_critique": manager_res,
@@ -227,36 +190,13 @@ async def analyze_stream(request: AnalyzeRequest):
                 "model_answer": "See Coach Feedback"
             }
             yield json.dumps({"type": "result", "data": final_response}) + "\n"
-            print("LOG: Stream Complete")
             
         except Exception as e:
-            print(f"CRITICAL ERROR IN STREAM: {str(e)}") # <--- CHECK YOUR TERMINAL FOR THIS
+            print(f"STREAM ERROR: {str(e)}")
             yield json.dumps({"type": "error", "message": str(e)}) + "\n"
 
     return StreamingResponse(event_generator(), media_type="application/x-ndjson")
 
-# Keep the old endpoint just in case you need a fallback
-@app.post("/analyze", response_model=AnalyzeResponse)
-async def analyze_answer(request: AnalyzeRequest):
-    full_context = get_full_role_context(request.target_role)
-    manager_res = await manager_chain.ainvoke({
-        "role": request.target_role,
-        "skills_context": full_context,
-        "resume_text": request.resume_text,
-        "question": request.question,
-        "student_answer": request.student_answer
-    })
-    coach_res = await coach_chain.ainvoke({
-        "manager_critique": manager_res,
-        "student_answer": request.student_answer
-    })
-    return AnalyzeResponse(
-        manager_critique=manager_res,
-        coach_feedback=coach_res,
-        model_answer="See Coach Feedback"
-    )
-
 if __name__ == "__main__":
     import uvicorn
-    # Use standard uvicorn run
     uvicorn.run(app, host="0.0.0.0", port=8000)
