@@ -267,58 +267,76 @@ async def analyze_stream(request: AnalyzeRequest):
 
 @app.post("/match_skills")
 async def match_skills(request: MatchRequest):
-    """
-    1. Fetches official skills for the role from DB.
-    2. Uses AI to compare Resume Text vs. Official Skills.
-    3. Returns which skills are 'Matched' and which are 'Missing'.
-    """
     try:
-        # A. GET OFFICIAL SKILLS FROM DB
         conn = sqlite3.connect("skills.db")
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        # Get Description
+        # 1. Get Role Description
         cursor.execute("SELECT description FROM role_descriptions WHERE role = ?", (request.target_role,))
         desc_row = cursor.fetchone()
-        role_desc = desc_row[0] if desc_row else "Standard industry role."
+        role_desc = desc_row["description"] if desc_row else f"A professional {request.target_role} role."
 
-        # Get Skills List
-        cursor.execute("""
-            SELECT s.title 
+        # 2. Get Skills + Proficiency + Aggregated Knowledge
+        # We join role_skills -> skill_definitions -> skill_details
+        query = """
+            SELECT 
+                s.title, 
+                s.skill_code, 
+                s.proficiency,
+                GROUP_CONCAT(d.detail_item, '; ') as knowledge_list
             FROM role_skills rs 
             JOIN skill_definitions s ON rs.skill_code = s.skill_code 
+            LEFT JOIN skill_details d ON s.skill_code = d.skill_code
             WHERE rs.role = ? 
+            GROUP BY s.skill_code
             LIMIT 8
-        """, (request.target_role,))
-        official_skills = [r[0] for r in cursor.fetchall()]
+        """
+        
+        cursor.execute(query, (request.target_role,))
+        rows = cursor.fetchall()
+        
+        detailed_skills = []
+        for row in rows:
+            skill_info = {
+                "skill": row["title"],
+                "code": row["skill_code"],
+                "level": row["proficiency"] if row["proficiency"] else "Standard",
+                # The knowledge list might be very long, so we truncate it for the AI
+                "required_knowledge": (row["knowledge_list"][:300] + "...") if row["knowledge_list"] else "General competency"
+            }
+            detailed_skills.append(skill_info)
+        
         conn.close()
 
-        if not official_skills:
-            return {"matched": [], "missing": [], "role_desc": role_desc}
+        # Fallback if DB is empty
+        if not detailed_skills:
+            detailed_skills = [{"skill": f"{request.target_role} Skills", "level": "Standard", "required_knowledge": "General"}]
 
-        # B. AI ANALYSIS (Semantic Matching)
-        # We ask the AI to strictly classify the skills based on the resume evidence.
+        # 3. AI Analysis
         prompt_text = f"""
-        You are a strict HR system. 
+        You are a Senior HR Auditor performing a Skill Gap Analysis.
         
-        TASK: Compare the Candidate's Resume against the Required Skills List.
+        JOB ROLE: {request.target_role}
+        DESCRIPTION: {role_desc}
         
-        REQUIRED SKILLS: {json.dumps(official_skills)}
+        REQUIRED COMPETENCIES (With Proficiency & Knowledge):
+        {json.dumps(detailed_skills, indent=2)}
         
         CANDIDATE RESUME: 
-        {request.resume_text[:4000]} (truncated)
+        {request.resume_text[:5000]}
         
         INSTRUCTIONS:
-        1. For EACH skill in the "REQUIRED SKILLS" list, check if the resume contains evidence of it (direct mention or strong synonym).
-        2. Output valid JSON only. Format:
+        1. Compare the Resume against the REQUIRED COMPETENCIES.
+        2. Strict Check: If a skill requires "Level 4" or specific knowledge (e.g., "AsyncIO"), and the resume is vague, mark it as a GAP.
+        3. Output JSON:
         {{
-            "matched_skills": ["Skill A", "Skill B"],
-            "missing_skills": ["Skill C", "Skill D"]
+            "matched_skills": [ {{ "skill": "Name", "reason": "Evidence found..." }} ],
+            "missing_skills": [ {{ "skill": "Name", "gap": "Missing specific evidence of..." }} ]
         }}
         """
 
-        # Call AI (using the lighter model for speed)
-        llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0, google_api_key=os.getenv("GOOGLE_API_KEY"))
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0, google_api_key=os.getenv("GOOGLE_API_KEY"))
         ai_response = llm.invoke(prompt_text)
         
         # Parse JSON
@@ -333,5 +351,4 @@ async def match_skills(request: MatchRequest):
 
     except Exception as e:
         print(f"MATCH ERROR: {e}")
-        # Fallback: Return all as missing if AI fails
         return {"matched": [], "missing": [], "role_desc": "Error analyzing skills."}
