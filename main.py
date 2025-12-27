@@ -16,15 +16,10 @@ from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from google.api_core.exceptions import ResourceExhausted
-from pydantic import BaseModel
 
 from pypdf import PdfReader
 import io
 import database
-
-class MatchRequest(BaseModel):
-    resume_text: str
-    target_role: str
 
 # 1. SETUP
 load_dotenv()
@@ -136,12 +131,41 @@ coach_prompt = ChatPromptTemplate.from_template(
     """
 )
 
+# Match Skills Prompt (Structured JSON Output)
+match_skills_prompt = ChatPromptTemplate.from_template(
+    """
+    You are a Senior HR Auditor performing a Skill Gap Analysis.
+    
+    JOB ROLE: {role}
+    DESCRIPTION: {role_desc}
+    
+    REQUIRED COMPETENCIES (With Proficiency & Knowledge):
+    {detailed_skills}
+    
+    CANDIDATE RESUME: 
+    {resume_text}
+    
+    INSTRUCTIONS:
+    1. Compare the Resume against the REQUIRED COMPETENCIES.
+    2. Strict Check: If a skill requires "Level 4" or specific knowledge (e.g., "AsyncIO"), and the resume is vague, mark it as a GAP.
+    3. Output valid JSON only:
+    {{
+        "matched_skills": [ {{ "skill": "Name", "reason": "Evidence found..." }} ],
+        "missing_skills": [ {{ "skill": "Name", "gap": "Missing specific evidence of..." }} ]
+    }}
+    """
+)
+
 # 5. MODELS
 class AnalyzeRequest(BaseModel):
     student_answer: str
     question: str
     target_role: str
     resume_text: str
+
+class MatchRequest(BaseModel):
+    resume_text: str
+    target_role: str
 
 # 6. ENDPOINTS
 @app.get("/")
@@ -268,17 +292,17 @@ async def analyze_stream(request: AnalyzeRequest):
 @app.post("/match_skills")
 async def match_skills(request: MatchRequest):
     try:
+        # A. FETCH DATA FROM DB
         conn = sqlite3.connect("skills.db")
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        # 1. Get Role Description
+        # Get Role Desc
         cursor.execute("SELECT description FROM role_descriptions WHERE role = ?", (request.target_role,))
         desc_row = cursor.fetchone()
         role_desc = desc_row["description"] if desc_row else f"A professional {request.target_role} role."
 
-        # 2. Get Skills + Proficiency + Aggregated Knowledge
-        # We join role_skills -> skill_definitions -> skill_details
+        # Get Skills + Proficiency + Knowledge
         query = """
             SELECT 
                 s.title, 
@@ -292,56 +316,44 @@ async def match_skills(request: MatchRequest):
             GROUP BY s.skill_code
             LIMIT 8
         """
-        
         cursor.execute(query, (request.target_role,))
         rows = cursor.fetchall()
         
         detailed_skills = []
         for row in rows:
-            skill_info = {
+            detailed_skills.append({
                 "skill": row["title"],
-                "code": row["skill_code"],
                 "level": row["proficiency"] if row["proficiency"] else "Standard",
-                # The knowledge list might be very long, so we truncate it for the AI
                 "required_knowledge": (row["knowledge_list"][:300] + "...") if row["knowledge_list"] else "General competency"
-            }
-            detailed_skills.append(skill_info)
+            })
         
         conn.close()
 
         # Fallback if DB is empty
         if not detailed_skills:
-            detailed_skills = [{"skill": f"{request.target_role} Skills", "level": "Standard", "required_knowledge": "General"}]
+            detailed_skills = [{"skill": f"{request.target_role} Core Skills", "level": "Standard", "required_knowledge": "General"}]
 
-        # 3. AI Analysis
-        prompt_text = f"""
-        You are a Senior HR Auditor performing a Skill Gap Analysis.
-        
-        JOB ROLE: {request.target_role}
-        DESCRIPTION: {role_desc}
-        
-        REQUIRED COMPETENCIES (With Proficiency & Knowledge):
-        {json.dumps(detailed_skills, indent=2)}
-        
-        CANDIDATE RESUME: 
-        {request.resume_text[:5000]}
-        
-        INSTRUCTIONS:
-        1. Compare the Resume against the REQUIRED COMPETENCIES.
-        2. Strict Check: If a skill requires "Level 4" or specific knowledge (e.g., "AsyncIO"), and the resume is vague, mark it as a GAP.
-        3. Output JSON:
-        {{
-            "matched_skills": [ {{ "skill": "Name", "reason": "Evidence found..." }} ],
-            "missing_skills": [ {{ "skill": "Name", "gap": "Missing specific evidence of..." }} ]
-        }}
-        """
+        # B. RUN DUAL LLM WITH FALLBACK
+        # We use the same helper function you used for the streaming analysis
+        inputs = {
+            "role": request.target_role,
+            "role_desc": role_desc,
+            "detailed_skills": json.dumps(detailed_skills, indent=2),
+            "resume_text": request.resume_text[:5000]
+        }
 
-        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0, google_api_key=os.getenv("GOOGLE_API_KEY"))
-        ai_response = llm.invoke(prompt_text)
+        ai_response_str = await run_chain_with_fallback(
+            match_skills_prompt, 
+            inputs, 
+            step_name="Skill Matcher"
+        )
         
-        # Parse JSON
-        content = ai_response.content.replace("```json", "").replace("```", "").strip()
-        result = json.loads(content)
+        # C. PARSE JSON
+        clean_json = re.sub(r"```json|```", "", ai_response_str).strip()
+        try:
+            result = json.loads(clean_json)
+        except json.JSONDecodeError:
+            result = {"matched_skills": [], "missing_skills": []}
         
         return {
             "matched": result.get("matched_skills", []),
