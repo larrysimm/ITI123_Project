@@ -95,16 +95,20 @@ def get_full_role_context(role: str) -> str:
     return context
 
 def get_detailed_skills(role_name):
-    """Helper to fetch skills with proficiency and knowledge from DB."""
+    """
+    Fetches explicit metadata (Role, Skill Code, Proficiency, Knowledge) 
+    to force the AI to cite sources precisely.
+    """
     try:
         conn = sqlite3.connect("skills.db")
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        # Get Skills + Proficiency + Aggregated Knowledge
+        # Added s.skill_code to the selection
         query = """
             SELECT 
                 s.title, 
+                s.skill_code,
                 s.proficiency,
                 GROUP_CONCAT(d.detail_item, '; ') as knowledge_list
             FROM role_skills rs 
@@ -112,24 +116,35 @@ def get_detailed_skills(role_name):
             LEFT JOIN skill_details d ON s.skill_code = d.skill_code
             WHERE rs.role = ? 
             GROUP BY s.skill_code
-            LIMIT 5
+            LIMIT 6
         """
         cursor.execute(query, (role_name,))
         rows = cursor.fetchall()
         conn.close()
         
         if not rows:
-            return "Standard industry skills for this role."
+            return f"Standard industry spec for {role_name} (No specific DB entry)."
 
-        # Format as a readable string for the LLM
-        skills_text = ""
+        # Format as a Strict Reference Document
+        skills_text = f"OFFICIAL SPECIFICATION FOR ROLE: {role_name.upper()}\n"
+        skills_text += "=" * 40 + "\n\n"
+        
         for row in rows:
-            knowledge = (row["knowledge_list"][:150] + "...") if row["knowledge_list"] else "General competency"
-            skills_text += f"- {row['title']} (Level: {row['proficiency'] or 'Standard'}): Requires knowledge of {knowledge}\n"
+            knowledge = (row["knowledge_list"][:200] + "...") if row["knowledge_list"] else "General application"
+            level = row["proficiency"] if row["proficiency"] else "Standard"
+            code = row["skill_code"]
+            
+            # Explicit Format
+            skills_text += f"Ref Code: [{code}]\n"
+            skills_text += f"Skill Title: {row['title']}\n"
+            skills_text += f"Required Level: {level}\n"
+            skills_text += f"Key Knowledge: {knowledge}\n"
+            skills_text += "-" * 20 + "\n"
         
         return skills_text
 
-    except Exception:
+    except Exception as e:
+        print(f"Error fetching skills: {e}")
         return "Standard industry skills."
 
 # 4. PROMPTS
@@ -153,9 +168,13 @@ manager_prompt = ChatPromptTemplate.from_template(
     
     YOUR TASK:
     Evaluate this answer strictly. 
-    1. **Skill Evidence:** Did they demonstrate the specific proficiencies listed above? (e.g. if the role needs 'Level 4 Data Analysis', did their story show that complexity, or was it basic?)
+    1. **Cite Your Sources:** You MUST reference the **Ref Code** (e.g., [ICT-DIT-3002-1.1]) when critiquing a specific skill.
+       - *Bad:* "You lack system design skills."
+       - *Good:* "Regarding **System Design (Ref: ICT-DES-4002-1.1)**, the spec requires Level 4 proficiency, but your answer was generic."
     2. **Depth:** Is the answer vague or does it show specific technical knowledge mentioned in the requirements?
-    3. **Verdict:** Be direct. If they missed a key technical requirement, say it.
+    3. **Compare Explicitly:** - Look at the **"Key Knowledge"** field in the data source. Did the candidate mention those specific keywords?
+       - If the data says "Level 5", but the candidate sounds like a junior, point out the gap.
+    4. **Verdict:** Be direct. If they missed a key technical requirement, say it.
     
     Keep your feedback professional but critical (approx 100 words). Focus on the *content* and *competence*, not just the communication style.
     """
@@ -184,24 +203,28 @@ coach_prompt = ChatPromptTemplate.from_template(
 # Match Skills Prompt (Structured JSON Output)
 match_skills_prompt = ChatPromptTemplate.from_template(
     """
-    You are a Senior HR Auditor performing a Skill Gap Analysis.
+    You are a Senior HR Auditor performing a Compliance Check.
     
-    JOB ROLE: {role}
-    DESCRIPTION: {role_desc}
-    
-    REQUIRED COMPETENCIES (With Proficiency & Knowledge):
+    ### DATABASE STANDARDS
     {detailed_skills}
     
-    CANDIDATE RESUME: 
+    ### CANDIDATE RESUME
     {resume_text}
     
-    INSTRUCTIONS:
-    1. Compare the Resume against the REQUIRED COMPETENCIES.
-    2. Strict Check: If a skill requires "Level 4" or specific knowledge (e.g., "AsyncIO"), and the resume is vague, mark it as a GAP.
-    3. Output valid JSON only:
+    ### TASK
+    Compare the Resume against the Database Standards.
+    
+    1. **Exact Matching:** A "Match" must demonstrate the specific **Required Level** defined in the standard.
+    2. **Citation:** In your reason/gap text, you MUST include the **Skill Name** and **Ref Code**.
+    
+    ### OUTPUT FORMAT (JSON)
     {{
-        "matched_skills": [ {{ "skill": "Name", "reason": "Evidence found..." }} ],
-        "missing_skills": [ {{ "skill": "Name", "gap": "Missing specific evidence of..." }} ]
+        "matched_skills": [ 
+            {{ "skill": "Skill Name", "reason": "Resume meets Level [X] requirement for [Ref Code] by demonstrating [Evidence]..." }} 
+        ],
+        "missing_skills": [ 
+            {{ "skill": "Skill Name", "gap": "Resume fails to meet Level [X] standard for [Ref Code]. Missing evidence of [Key Knowledge]..." }} 
+        ]
     }}
     """
 )
