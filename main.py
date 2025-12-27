@@ -174,7 +174,29 @@ def get_questions():
     except Exception as e:
         print(f"Error fetching questions: {e}")
         return []
-    
+
+@app.get("/roles")
+def get_roles():
+    """
+    Fetches a unique list of job roles from the database.
+    """
+    try:
+        conn = sqlite3.connect("skills.db")
+        cursor = conn.cursor()
+        
+        # Get unique roles sorted alphabetically
+        cursor.execute("SELECT DISTINCT role FROM role_descriptions ORDER BY role ASC")
+        rows = cursor.fetchall()
+        
+        # Convert list of tuples [('Role A',), ('Role B',)] to simple list ['Role A', 'Role B']
+        roles = [row[0] for row in rows]
+        
+        conn.close()
+        return roles
+    except Exception as e:
+        print(f"Error fetching roles: {e}")
+        return [] # Return empty list on failure
+
 @app.post("/upload_resume")
 async def upload_resume(file: UploadFile = File(...)):
     content = await file.read()
