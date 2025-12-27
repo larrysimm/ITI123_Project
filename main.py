@@ -318,9 +318,7 @@ async def analyze_stream(request: AnalyzeRequest):
             yield json.dumps({"type": "step", "step_id": 1, "message": "Extracting Data..."}) + "\n"
             
             loop = asyncio.get_event_loop()
-            # Fetch the strict "Official Specifications"
             detailed_skills_str = await loop.run_in_executor(None, get_detailed_skills, request.target_role)
-            await asyncio.sleep(0.5) # Small visual delay
 
             # --- STEP 2: MANAGER ANALYSIS ---
             yield json.dumps({"type": "step", "step_id": 2, "message": "Manager Analysis..."}) + "\n"
@@ -346,7 +344,7 @@ async def analyze_stream(request: AnalyzeRequest):
                 "Coach Agent"
             )
             
-            # Parsing Logic
+            # (JSON Parsing Logic...)
             clean_json = re.sub(r"```json|```", "", coach_raw_res).strip()
             try:
                 coach_data = json.loads(clean_json)
@@ -356,14 +354,24 @@ async def analyze_stream(request: AnalyzeRequest):
                 coach_critique = "Could not parse feedback."
                 rewritten_answer = coach_raw_res
 
-            # --- STEP 4: FINALIZE ---
-            yield json.dumps({"type": "step", "step_id": 4, "message": "Done."}) + "\n"
+            # --- STEP 4: FINAL DRAFTING (The Real Fix) ---
+            # 1. Send the visual update FIRST
+            yield json.dumps({"type": "step", "step_id": 4, "message": "Drafting Response..."}) + "\n"
+            
+            # 2. Force network flush so the UI updates BEFORE the LLM starts working
+            await asyncio.sleep(0.05) 
+
+            # 3. NOW run the final heavy task (if you have a dedicated drafting step, put it here)
+            # If you don't have a 3rd LLM call, this step will be instant.
+            # Assuming you are just compiling data:
             
             final_data = {
                 "manager_critique": manager_res,
                 "coach_critique": coach_critique,    
                 "rewritten_answer": rewritten_answer 
             }
+            
+            # 4. Send Result
             yield json.dumps({"type": "result", "data": final_data}) + "\n"
 
         except Exception as e:
