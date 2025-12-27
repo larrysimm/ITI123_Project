@@ -135,7 +135,7 @@ def get_detailed_skills(role_name):
             code = row["skill_code"]
             
             # Explicit Format
-            skills_text += f"Ref Code: [{code}]\n"
+            skills_text += f"Ref Code: [{row['skill_code']}]\n"
             skills_text += f"Skill Title: {row['title']}\n"
             skills_text += f"Required Level: {level}\n"
             skills_text += f"Key Knowledge: {knowledge}\n"
@@ -205,7 +205,7 @@ match_skills_prompt = ChatPromptTemplate.from_template(
     """
     You are a Senior HR Auditor performing a Compliance Check.
     
-    ### DATABASE STANDARDS
+    ### OFFICIAL DATABASE STANDARDS (Source of Truth)
     {detailed_skills}
     
     ### CANDIDATE RESUME
@@ -215,15 +215,23 @@ match_skills_prompt = ChatPromptTemplate.from_template(
     Compare the Resume against the Database Standards.
     
     1. **Exact Matching:** A "Match" must demonstrate the specific **Required Level** defined in the standard.
-    2. **Citation:** In your reason/gap text, you MUST include the **Skill Name** and **Ref Code**.
+    2. **Citation:** You MUST extract the **Ref Code** (e.g., [ICT-DIT-3002-1.1]) for every skill.
     
-    ### OUTPUT FORMAT (JSON)
+    ### OUTPUT FORMAT (Strict JSON)
     {{
         "matched_skills": [ 
-            {{ "skill": "Skill Name", "reason": "Resume meets Level [X] requirement for [Ref Code] by demonstrating [Evidence]..." }} 
+            {{ 
+                "skill": "Skill Name", 
+                "code": "Ref Code from DB", 
+                "reason": "Resume meets Level [X] requirement. Evidence: [Quote]..." 
+            }} 
         ],
         "missing_skills": [ 
-            {{ "skill": "Skill Name", "gap": "Resume fails to meet Level [X] standard for [Ref Code]. Missing evidence of [Key Knowledge]..." }} 
+            {{ 
+                "skill": "Skill Name", 
+                "code": "Ref Code from DB", 
+                "gap": "Resume fails to meet Level [X] standard. Missing evidence of [Key Knowledge]..." 
+            }} 
         ]
     }}
     """
