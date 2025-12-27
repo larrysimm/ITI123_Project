@@ -306,31 +306,31 @@ async def upload_resume(file: UploadFile = File(...)):
 async def analyze_stream(request: AnalyzeRequest):
     async def event_generator():
         try:
-            # Step 1: Context
-            yield json.dumps({"type": "step", "step_id": 1, "message": "Fetching Skill Matrix..."}) + "\n"
-            await asyncio.sleep(0.5)
+            # --- STEP 1: CONTEXT & SKILLS ---
+            yield json.dumps({"type": "step", "step_id": 1, "message": "Extracting Data..."}) + "\n"
             
-            # --- UPDATED: Use the specific Skill Matrix Helper ---
             loop = asyncio.get_event_loop()
+            # Fetch the strict "Official Specifications"
             detailed_skills_str = await loop.run_in_executor(None, get_detailed_skills, request.target_role)
+            await asyncio.sleep(0.5) # Small visual delay
 
-            # Step 2: Manager Analysis
-            yield json.dumps({"type": "step", "step_id": 2, "message": "Manager analyzing proficiency..."}) + "\n"
+            # --- STEP 2: MANAGER ANALYSIS ---
+            yield json.dumps({"type": "step", "step_id": 2, "message": "Manager Analysis..."}) + "\n"
             
             manager_res = await run_chain_with_fallback(
                 manager_prompt,
                 {
                     "role": request.target_role,
-                    "detailed_skills": detailed_skills_str,  # <--- Pass the DB skills here
-                    "resume_text": request.resume_text[:2000], # Truncate to save tokens
+                    "detailed_skills": detailed_skills_str,
+                    "resume_text": request.resume_text[:2000],
                     "question": request.question,
                     "student_answer": request.student_answer
                 }, 
                 "Manager Agent"
             )
 
-            # Step 3: Coach Refinement (Returns JSON String)
-            yield json.dumps({"type": "step", "step_id": 3, "message": "Coach optimizing structure..."}) + "\n"
+            # --- STEP 3: COACH REFINEMENT ---
+            yield json.dumps({"type": "step", "step_id": 3, "message": "Coach Refinement..."}) + "\n"
             
             coach_raw_res = await run_chain_with_fallback(
                 coach_prompt,
@@ -338,18 +338,18 @@ async def analyze_stream(request: AnalyzeRequest):
                 "Coach Agent"
             )
             
-            # PARSE JSON RESPONSE
+            # Parsing Logic
             clean_json = re.sub(r"```json|```", "", coach_raw_res).strip()
             try:
                 coach_data = json.loads(clean_json)
-                coach_critique = coach_data.get("coach_critique", "Error parsing critique.")
-                rewritten_answer = coach_data.get("rewritten_answer", "Error parsing answer.")
-            except json.JSONDecodeError:
-                coach_critique = "Could not parse specific feedback."
+                coach_critique = coach_data.get("coach_critique", "Analysis failed.")
+                rewritten_answer = coach_data.get("rewritten_answer", coach_raw_res)
+            except:
+                coach_critique = "Could not parse feedback."
                 rewritten_answer = coach_raw_res
 
-            # Step 4: Finish
-            yield json.dumps({"type": "step", "step_id": 4, "message": "Finalizing..."}) + "\n"
+            # --- STEP 4: FINALIZE ---
+            yield json.dumps({"type": "step", "step_id": 4, "message": "Done."}) + "\n"
             
             final_data = {
                 "manager_critique": manager_res,
@@ -359,7 +359,6 @@ async def analyze_stream(request: AnalyzeRequest):
             yield json.dumps({"type": "result", "data": final_data}) + "\n"
 
         except Exception as e:
-            print(f"STREAM ERROR: {e}")
             yield json.dumps({"type": "error", "message": str(e)}) + "\n"
 
     return StreamingResponse(event_generator(), media_type="application/x-ndjson")
