@@ -64,6 +64,32 @@ async def run_chain_with_fallback(prompt_template, inputs, step_name="AI"):
             return await chain.ainvoke(inputs)
         except Exception as groq_e:
             raise Exception(f"Both AI Engines Failed: {str(groq_e)}")
+        
+        import re
+import json
+
+def extract_clean_json(text):
+    """
+    Strips '```json' formatting and finds the actual JSON object { ... }
+    """
+    try:
+        # 1. Remove Markdown code blocks
+        text = re.sub(r"```json|```", "", text, flags=re.IGNORECASE).strip()
+        
+        # 2. Find the content between the first '{' and the last '}'
+        start_idx = text.find("{")
+        end_idx = text.rfind("}")
+        
+        if start_idx == -1 or end_idx == -1:
+            return None
+            
+        json_str = text[start_idx : end_idx + 1]
+        
+        # 3. Parse and return
+        return json.loads(json_str)
+        
+    except json.JSONDecodeError:
+        return None
 
 # 3. DATABASE CONTEXT RETRIEVER
 def get_full_role_context(role: str) -> str:
@@ -443,23 +469,21 @@ async def match_skills(request: MatchRequest):
             "resume_text": request.resume_text[:5000]
         }
 
-        print("   🤖 Asking AI to match...")
         ai_response_str = await run_chain_with_fallback(
             match_skills_prompt, 
             inputs, 
             step_name="Skill Matcher"
         )
         
-        # 4. Clean & Parse JSON
-        clean_json = re.sub(r"```json|```", "", ai_response_str).strip()
-        try:
-            result = json.loads(clean_json)
-        except json.JSONDecodeError as e:
-            print(f"   ❌ JSON PARSE ERROR: {e}\n   Response: {ai_response_str}")
-            # Return a valid empty structure so frontend doesn't crash
+        # --- FIX: USE THE CLEANER FUNCTION ---
+        result = extract_clean_json(ai_response_str)
+        
+        # Validation
+        if not result:
+            print(f"⚠️ JSON Parse Failed. Raw output:\n{ai_response_str}")
             return {
                 "matched": [], 
-                "missing": [{"skill": "Error", "code": "N/A", "gap": "AI Analysis Failed to generate JSON."}], 
+                "missing": [{"skill": "Parsing Error", "code": "N/A", "gap": "Could not format analysis."}], 
                 "role_desc": role_desc
             }
         
@@ -471,4 +495,4 @@ async def match_skills(request: MatchRequest):
 
     except Exception as e:
         print(f"❌ MATCH ERROR: {e}")
-        return {"matched": [], "missing": [], "role_desc": "System Error analyzing skills."}
+        return {"matched": [], "missing": [], "role_desc": "System Error."}
