@@ -94,20 +94,70 @@ def get_full_role_context(role: str) -> str:
     for t, d in skills: context += f"- {t}: {d}\n"
     return context
 
+def get_detailed_skills(role_name):
+    """Helper to fetch skills with proficiency and knowledge from DB."""
+    try:
+        conn = sqlite3.connect("skills.db")
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        # Get Skills + Proficiency + Aggregated Knowledge
+        query = """
+            SELECT 
+                s.title, 
+                s.proficiency,
+                GROUP_CONCAT(d.detail_item, '; ') as knowledge_list
+            FROM role_skills rs 
+            JOIN skill_definitions s ON rs.skill_code = s.skill_code 
+            LEFT JOIN skill_details d ON s.skill_code = d.skill_code
+            WHERE rs.role = ? 
+            GROUP BY s.skill_code
+            LIMIT 5
+        """
+        cursor.execute(query, (role_name,))
+        rows = cursor.fetchall()
+        conn.close()
+        
+        if not rows:
+            return "Standard industry skills for this role."
+
+        # Format as a readable string for the LLM
+        skills_text = ""
+        for row in rows:
+            knowledge = (row["knowledge_list"][:150] + "...") if row["knowledge_list"] else "General competency"
+            skills_text += f"- {row['title']} (Level: {row['proficiency'] or 'Standard'}): Requires knowledge of {knowledge}\n"
+        
+        return skills_text
+
+    except Exception:
+        return "Standard industry skills."
+
 # 4. PROMPTS
 
 # Manager Prompt (Standard Text Output)
 manager_prompt = ChatPromptTemplate.from_template(
     """
-    You are a Hiring Manager for {role}.
-    OFFICIAL SPECS: {skills_context}
-    RESUME: {resume_text}
-    QUESTION: {question}
-    ANSWER: {student_answer}
+    You are a skeptcial, high-standards Hiring Manager for a {role} position.
     
-    Compare the answer to the specs. 
-    Identify 2 specific gaps regarding terminology or technical depth.
-    Be concise.
+    THE ROLE REQUIRES THESE SPECIFIC COMPETENCIES (from our internal spec):
+    {detailed_skills}
+    
+    CANDIDATE'S RESUME SUMMARY:
+    {resume_text}
+    
+    INTERVIEW QUESTION:
+    "{question}"
+    
+    CANDIDATE'S ANSWER:
+    "{student_answer}"
+    
+    YOUR TASK:
+    Evaluate this answer strictly. 
+    1. **Skill Evidence:** Did they demonstrate the specific proficiencies listed above? (e.g. if the role needs 'Level 4 Data Analysis', did their story show that complexity, or was it basic?)
+    2. **Depth:** Is the answer vague or does it show specific technical knowledge mentioned in the requirements?
+    3. **Verdict:** Be direct. If they missed a key technical requirement, say it.
+    
+    Keep your feedback professional but critical (approx 100 words). Focus on the *content* and *competence*, not just the communication style.
     """
 )
 
@@ -234,28 +284,31 @@ async def analyze_stream(request: AnalyzeRequest):
     async def event_generator():
         try:
             # Step 1: Context
-            yield json.dumps({"type": "step", "step_id": 1, "message": "Ingesting Context..."}) + "\n"
+            yield json.dumps({"type": "step", "step_id": 1, "message": "Fetching Skill Matrix..."}) + "\n"
             await asyncio.sleep(0.5)
             
+            # --- UPDATED: Use the specific Skill Matrix Helper ---
             loop = asyncio.get_event_loop()
-            full_context = await loop.run_in_executor(None, get_full_role_context, request.target_role)
+            detailed_skills_str = await loop.run_in_executor(None, get_detailed_skills, request.target_role)
 
-            # Step 2: Manager
-            yield json.dumps({"type": "step", "step_id": 2, "message": "Manager Analysis..."}) + "\n"
+            # Step 2: Manager Analysis
+            yield json.dumps({"type": "step", "step_id": 2, "message": "Manager analyzing proficiency..."}) + "\n"
+            
             manager_res = await run_chain_with_fallback(
                 manager_prompt,
                 {
                     "role": request.target_role,
-                    "skills_context": full_context,
-                    "resume_text": request.resume_text,
+                    "detailed_skills": detailed_skills_str,  # <--- Pass the DB skills here
+                    "resume_text": request.resume_text[:2000], # Truncate to save tokens
                     "question": request.question,
                     "student_answer": request.student_answer
                 }, 
                 "Manager Agent"
             )
 
-            # Step 3: Coach (Returns JSON String)
-            yield json.dumps({"type": "step", "step_id": 3, "message": "Coach Refinement..."}) + "\n"
+            # Step 3: Coach Refinement (Returns JSON String)
+            yield json.dumps({"type": "step", "step_id": 3, "message": "Coach optimizing structure..."}) + "\n"
+            
             coach_raw_res = await run_chain_with_fallback(
                 coach_prompt,
                 {"manager_critique": manager_res, "student_answer": request.student_answer},
@@ -263,23 +316,22 @@ async def analyze_stream(request: AnalyzeRequest):
             )
             
             # PARSE JSON RESPONSE
-            # Clean up potential Markdown wrappers like ```json ... ```
             clean_json = re.sub(r"```json|```", "", coach_raw_res).strip()
             try:
                 coach_data = json.loads(clean_json)
                 coach_critique = coach_data.get("coach_critique", "Error parsing critique.")
                 rewritten_answer = coach_data.get("rewritten_answer", "Error parsing answer.")
             except json.JSONDecodeError:
-                # Fallback if AI fails to give JSON
                 coach_critique = "Could not parse specific feedback."
                 rewritten_answer = coach_raw_res
 
             # Step 4: Finish
             yield json.dumps({"type": "step", "step_id": 4, "message": "Finalizing..."}) + "\n"
+            
             final_data = {
                 "manager_critique": manager_res,
-                "coach_critique": coach_critique,    # <--- NEW FIELD
-                "rewritten_answer": rewritten_answer # <--- NEW FIELD
+                "coach_critique": coach_critique,    
+                "rewritten_answer": rewritten_answer 
             }
             yield json.dumps({"type": "result", "data": final_data}) + "\n"
 
