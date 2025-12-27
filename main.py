@@ -16,10 +16,15 @@ from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from google.api_core.exceptions import ResourceExhausted
+from pydantic import BaseModel
 
 from pypdf import PdfReader
 import io
 import database
+
+class MatchRequest(BaseModel):
+    resume_text: str
+    target_role: str
 
 # 1. SETUP
 load_dotenv()
@@ -34,10 +39,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-@app.get("/")
-async def root():
-    return {"status": "OK", "message": "Poly-to-Pro Backend is Live"}
 
 # 2. DUAL AI SETUP
 gemini_llm = ChatGoogleGenerativeAI(
@@ -263,3 +264,74 @@ async def analyze_stream(request: AnalyzeRequest):
             yield json.dumps({"type": "error", "message": str(e)}) + "\n"
 
     return StreamingResponse(event_generator(), media_type="application/x-ndjson")
+
+@app.post("/match_skills")
+async def match_skills(request: MatchRequest):
+    """
+    1. Fetches official skills for the role from DB.
+    2. Uses AI to compare Resume Text vs. Official Skills.
+    3. Returns which skills are 'Matched' and which are 'Missing'.
+    """
+    try:
+        # A. GET OFFICIAL SKILLS FROM DB
+        conn = sqlite3.connect("skills.db")
+        cursor = conn.cursor()
+        
+        # Get Description
+        cursor.execute("SELECT description FROM role_descriptions WHERE role = ?", (request.target_role,))
+        desc_row = cursor.fetchone()
+        role_desc = desc_row[0] if desc_row else "Standard industry role."
+
+        # Get Skills List
+        cursor.execute("""
+            SELECT s.title 
+            FROM role_skills rs 
+            JOIN skill_definitions s ON rs.skill_code = s.skill_code 
+            WHERE rs.role = ? 
+            LIMIT 8
+        """, (request.target_role,))
+        official_skills = [r[0] for r in cursor.fetchall()]
+        conn.close()
+
+        if not official_skills:
+            return {"matched": [], "missing": [], "role_desc": role_desc}
+
+        # B. AI ANALYSIS (Semantic Matching)
+        # We ask the AI to strictly classify the skills based on the resume evidence.
+        prompt_text = f"""
+        You are a strict HR system. 
+        
+        TASK: Compare the Candidate's Resume against the Required Skills List.
+        
+        REQUIRED SKILLS: {json.dumps(official_skills)}
+        
+        CANDIDATE RESUME: 
+        {request.resume_text[:4000]} (truncated)
+        
+        INSTRUCTIONS:
+        1. For EACH skill in the "REQUIRED SKILLS" list, check if the resume contains evidence of it (direct mention or strong synonym).
+        2. Output valid JSON only. Format:
+        {{
+            "matched_skills": ["Skill A", "Skill B"],
+            "missing_skills": ["Skill C", "Skill D"]
+        }}
+        """
+
+        # Call AI (using the lighter model for speed)
+        llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", temperature=0, google_api_key=os.getenv("GOOGLE_API_KEY"))
+        ai_response = llm.invoke(prompt_text)
+        
+        # Parse JSON
+        content = ai_response.content.replace("```json", "").replace("```", "").strip()
+        result = json.loads(content)
+        
+        return {
+            "matched": result.get("matched_skills", []),
+            "missing": result.get("missing_skills", []),
+            "role_desc": role_desc
+        }
+
+    except Exception as e:
+        print(f"MATCH ERROR: {e}")
+        # Fallback: Return all as missing if AI fails
+        return {"matched": [], "missing": [], "role_desc": "Error analyzing skills."}
