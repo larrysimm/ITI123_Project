@@ -413,6 +413,7 @@ async def match_skills(request: MatchRequest):
         for row in rows:
             detailed_skills.append({
                 "skill": row["title"],
+                "code": row["skill_code"],
                 "level": row["proficiency"] if row["proficiency"] else "Standard",
                 "required_knowledge": (row["knowledge_list"][:300] + "...") if row["knowledge_list"] else "General competency"
             })
