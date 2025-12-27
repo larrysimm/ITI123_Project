@@ -382,33 +382,39 @@ async def analyze_stream(request: AnalyzeRequest):
 @app.post("/match_skills")
 async def match_skills(request: MatchRequest):
     try:
-        # A. FETCH DATA FROM DB
+        print(f"🔍 MATCH REQUEST for Role: '{request.target_role}'")
+        
         conn = sqlite3.connect("skills.db")
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
-        # Get Role Desc
+        # 1. Get Role Description
         cursor.execute("SELECT description FROM role_descriptions WHERE role = ?", (request.target_role,))
         desc_row = cursor.fetchone()
         role_desc = desc_row["description"] if desc_row else f"A professional {request.target_role} role."
 
-        # Get Skills + Proficiency + Knowledge
+        # 2. Get Skills (ROBUST QUERY)
+        # We use LEFT JOIN so we don't lose the skill if the definition is missing.
+        # We also select rs.skill_title as a backup if s.title is null.
         query = """
             SELECT 
-                s.title, 
-                s.skill_code, 
+                COALESCE(s.title, rs.skill_title) as title, 
+                rs.skill_code, 
                 s.proficiency,
                 GROUP_CONCAT(d.detail_item, '; ') as knowledge_list
             FROM role_skills rs 
-            JOIN skill_definitions s ON rs.skill_code = s.skill_code 
-            LEFT JOIN skill_details d ON s.skill_code = d.skill_code
+            LEFT JOIN skill_definitions s ON rs.skill_code = s.skill_code 
+            LEFT JOIN skill_details d ON rs.skill_code = d.skill_code
             WHERE rs.role = ? 
-            GROUP BY s.skill_code
+            GROUP BY rs.skill_code
             LIMIT 8
         """
+        
         cursor.execute(query, (request.target_role,))
         rows = cursor.fetchall()
         
+        print(f"   found {len(rows)} skills in DB.") # <--- DEBUG PRINT
+
         detailed_skills = []
         for row in rows:
             detailed_skills.append({
@@ -422,10 +428,14 @@ async def match_skills(request: MatchRequest):
 
         # Fallback if DB is empty
         if not detailed_skills:
-            detailed_skills = [{"skill": f"{request.target_role} Core Skills", "level": "Standard", "required_knowledge": "General"}]
+            print("   ⚠️ No skills found. Using AI fallback.")
+            detailed_skills = [
+                {"skill": "System Architecture", "code": "N/A", "level": "Intermediate", "required_knowledge": "General System Design"},
+                {"skill": "Software Development", "code": "N/A", "level": "Intermediate", "required_knowledge": "Coding Standards"}
+            ]
 
-        # B. RUN DUAL LLM WITH FALLBACK
-        # We use the same helper function you used for the streaming analysis
+        # 3. AI Analysis
+        # Ensure we pass the 'code' field to the AI so it doesn't return N/A
         inputs = {
             "role": request.target_role,
             "role_desc": role_desc,
@@ -433,18 +443,25 @@ async def match_skills(request: MatchRequest):
             "resume_text": request.resume_text[:5000]
         }
 
+        print("   🤖 Asking AI to match...")
         ai_response_str = await run_chain_with_fallback(
             match_skills_prompt, 
             inputs, 
             step_name="Skill Matcher"
         )
         
-        # C. PARSE JSON
+        # 4. Clean & Parse JSON
         clean_json = re.sub(r"```json|```", "", ai_response_str).strip()
         try:
             result = json.loads(clean_json)
-        except json.JSONDecodeError:
-            result = {"matched_skills": [], "missing_skills": []}
+        except json.JSONDecodeError as e:
+            print(f"   ❌ JSON PARSE ERROR: {e}\n   Response: {ai_response_str}")
+            # Return a valid empty structure so frontend doesn't crash
+            return {
+                "matched": [], 
+                "missing": [{"skill": "Error", "code": "N/A", "gap": "AI Analysis Failed to generate JSON."}], 
+                "role_desc": role_desc
+            }
         
         return {
             "matched": result.get("matched_skills", []),
@@ -453,5 +470,5 @@ async def match_skills(request: MatchRequest):
         }
 
     except Exception as e:
-        print(f"MATCH ERROR: {e}")
-        return {"matched": [], "missing": [], "role_desc": "Error analyzing skills."}
+        print(f"❌ MATCH ERROR: {e}")
+        return {"matched": [], "missing": [], "role_desc": "System Error analyzing skills."}
