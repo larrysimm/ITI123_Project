@@ -105,32 +105,41 @@ def init_db():
             df_tasks.columns = ['role', 'function', 'task']
             df_tasks.to_sql('role_tasks', conn, if_exists='replace', index=False)
 
-            print("3️⃣  Processing Role Skills...")
+            print("3️⃣  Processing Role Skills (With Proficiency)...")
             df_map = pd.read_csv(os.path.join(BASE_DIR, FILES["role_skills"]))
-            df_map = df_map[['Job Role', 'TSC_CCS Title', 'TSC_CCS Code']]
-            df_map.columns = ['role', 'skill_title', 'skill_code']
+
+            # Detect proficiency column dynamically
+            proficiency_col = None
+            for col in df_map.columns:
+                if 'proficiency' in col.lower():
+                    proficiency_col = col
+                    break
+
+            cols = ['Job Role', 'TSC_CCS Title', 'TSC_CCS Code']
+            if proficiency_col:
+                cols.append(proficiency_col)
+
+            df_map = df_map[cols]
+
+            if proficiency_col:
+                df_map.columns = ['role', 'skill_title', 'skill_code', 'proficiency']
+            else:
+                df_map.columns = ['role', 'skill_title', 'skill_code']
+                df_map['proficiency'] = "Standard"
+
             df_map.to_sql('role_skills', conn, if_exists='replace', index=False)
 
-            print("4️⃣  Processing Skill Definitions (With Proficiency)...")
+            print("4️⃣  Processing Skill Definitions...")
             df_info = pd.read_csv(os.path.join(BASE_DIR, FILES["skill_info"]))
-            
-            # --- UPDATE: Check for Proficiency Column ---
-            # We look for 'Proficiency Level' or similar. 
-            # If your CSV uses a different name, change 'Proficiency Level' below.
-            cols_to_use = ['TSC Code', 'TSC_CCS Title', 'TSC_CCS Description']
-            
-            if 'Proficiency Level' in df_info.columns:
-                cols_to_use.append('Proficiency Level')
-                df_info = df_info[cols_to_use]
-                df_info.columns = ['skill_code', 'title', 'description', 'proficiency']
-            else:
-                print("   ⚠️ 'Proficiency Level' column not found in skill_defs.csv. Using default.")
-                df_info = df_info[cols_to_use]
-                df_info.columns = ['skill_code', 'title', 'description']
-                df_info['proficiency'] = "Standard" # Default value
+
+            df_info = df_info[
+                ['TSC Code', 'TSC_CCS Title', 'TSC_CCS Description']
+            ]
+
+            df_info.columns = ['skill_code', 'title', 'description']
 
             df_info.to_sql('skill_definitions', conn, if_exists='replace', index=False)
-            
+
             print("5️⃣  Processing Skill Details...")
             df_ka = pd.read_csv(os.path.join(BASE_DIR, FILES["skill_details"]))
             df_ka = df_ka[['TSC_CCS Code', 'Knowledge / Ability Items']]
