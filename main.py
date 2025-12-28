@@ -258,20 +258,40 @@ manager_prompt = ChatPromptTemplate.from_template(
 # Coach Prompt (Structured JSON Output)
 coach_prompt = ChatPromptTemplate.from_template(
     """
-    You are a Career Coach.
-    CRITIQUE: {manager_critique}
-    ORIGINAL ANSWER: {student_answer}
+    You are an expert Interview Coach specializing in the STAR method (Situation, Task, Action, Result).
     
-    Task 1: Critique the original answer specifically on the STAR method (Situation, Task, Action, Result). Was it followed?
-    Task 2: Rewrite the answer to be perfect, addressing the Manager's critique and using the STAR method strictly.
+    MANAGER'S CRITIQUE:
+    "{manager_critique}"
     
-    You MUST output valid JSON only, with this exact structure:
+    CANDIDATE'S ORIGINAL ANSWER:
+    "{student_answer}"
+    
+    YOUR TASK:
+    Rewrite the answer to address the Manager's critique while maintaining the candidate's original voice.
+    
+    IMPORTANT OUTPUT INSTRUCTIONS:
+    --------------------------------------------------------
+    You must output your response in TWO parts:
+    
+    PART 1: Internal Strategy (Wrapped in <thinking> tags)
+    - Plan how to restructure the answer.
+    - Identify which parts of the original answer are weak.
+    - Decide how to weave in the missing skills the Manager asked for.
+    
+    PART 2: Final JSON Output
+    - Provide the structural feedback and the rewritten answer in strict JSON format.
+    
+    Output Format:
+    <thinking>
+    The manager wants more emphasis on 'System Design'. I will expand the 'Task' section...
+    </thinking>
+    
+    ```json
     {{
-        "coach_critique": "Your feedback on their use of STAR...",
-        "rewritten_answer": "Situation: ... Task: ... Action: ... Result: ..."
+        "coach_critique": "I have restructured your answer to focus on...",
+        "rewritten_answer": "**Situation:** ... **Task:** ... **Action:** ... **Result:** ..."
     }}
-    
-    Do not add Markdown formatting (like ```json). Just the raw JSON.
+    ```
     """
 )
 
@@ -436,33 +456,43 @@ async def analyze_stream(request: AnalyzeRequest):
             # --- STEP 3: COACH REFINEMENT ---
             yield json.dumps({"type": "step", "step_id": 3, "message": "Coach Refinement..."}) + "\n"
             
-            # 🔹 UPDATE: Send ONLY the clean feedback to the Coach (don't confuse it with the thinking trace)
-            coach_raw_res = await run_chain_with_fallback(
+            # 1. Call Coach Agent (Now returns Thinking + JSON)
+            raw_coach_res = await run_chain_with_fallback(
                 coach_prompt,
                 {"manager_critique": manager_feedback_clean, "student_answer": request.student_answer},
                 "Coach Agent"
             )
             
-            # (JSON Parsing Logic remains the same)
-            clean_json = re.sub(r"```json|```", "", coach_raw_res).strip()
+            # 2. ✂️ SPLIT DATA (Thinking vs. JSON)
+            coach_thinking, coach_json_str = parse_llm_response(raw_coach_res)
+
+            # 3. 🚀 SEND THINKING TRACE IMMEDIATELY
+            yield json.dumps({
+                "type": "partial_update", 
+                "data": { "coach_thinking": coach_thinking }
+            }) + "\n"
+            
+            # 4. Parse the JSON part
+            clean_json = re.sub(r"```json|```", "", coach_json_str).strip()
             try:
                 coach_data = json.loads(clean_json)
                 coach_critique = coach_data.get("coach_critique", "Analysis failed.")
                 rewritten_answer = coach_data.get("rewritten_answer", coach_raw_res)
             except:
                 coach_critique = "Could not parse feedback."
-                rewritten_answer = coach_raw_res
+                rewritten_answer = coach_json_str # Fallback to the text without thinking tags
 
-            # --- STEP 4: FINAL DRAFTING ---
+            # --- STEP 4: FINAL RESPONSE ---
             yield json.dumps({"type": "step", "step_id": 4, "message": "Drafting Response..."}) + "\n"
             
             await asyncio.sleep(0.05) 
 
-            # 🔹 UPDATE: Add 'manager_thinking' and use 'manager_feedback_clean'
+            # 5. Add 'coach_thinking' to final payload
             final_data = {
-                "manager_critique": manager_feedback_clean, # The clean text for the card
-                "manager_thinking": manager_thinking,       # The trace for the "Brain" card
-                "coach_critique": coach_critique,    
+                "manager_critique": manager_feedback_clean,
+                "manager_thinking": manager_thinking,
+                "coach_critique": coach_critique,
+                "coach_thinking": coach_thinking,    # <--- Add this
                 "rewritten_answer": rewritten_answer 
             }
             
