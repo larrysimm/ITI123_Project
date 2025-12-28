@@ -260,31 +260,37 @@ coach_prompt = ChatPromptTemplate.from_template(
     """
     You are an expert Interview Coach specializing in the STAR method (Situation, Task, Action, Result).
     
-    MANAGER'S CRITIQUE:
-    "{manager_critique}"
+    INPUTS:
+    1. **Manager's Technical Requirements:** "{manager_critique}" (Use this ONLY for rewriting the answer).
+    2. **Candidate's Original Answer:** "{student_answer}"
     
-    CANDIDATE'S ORIGINAL ANSWER:
-    "{student_answer}"
-    
-    YOUR TASK:
-    Rewrite the answer to address the Manager's critique while maintaining the candidate's original voice.
+    YOUR GOAL:
+    1. **Audit the Structure:** Check if the *Candidate's Original Answer* follows the STAR format (Situation, Task, Action, Result).
+    2. **Rewrite the Content:**Create a perfect answer that fixes the structure AND adds the technical skills requested by the Manager.
     
     IMPORTANT OUTPUT INSTRUCTIONS:
     --------------------------------------------------------
     You must output your response in TWO parts:
     
     PART 1: Internal Strategy (Wrapped in <thinking> tags)
-    - Plan how to restructure the answer.
-    - Identify which parts of the original answer are weak.
-    - Decide how to weave in the missing skills the Manager asked for.
+    - Identify which letters of S-T-A-R were weak or missing in the original text.
     
     PART 2: Final JSON Output
-    - "coach_critique": A direct critique of the ORIGINAL answer's structure. (e.g., "Your 'Action' section was too vague and you completely missed the 'Result'.")
-    - "rewritten_answer": The fully polished, STAR-formatted response.
-
+    
+    Field 1: "coach_critique"
+    - **DO NOT** mention technical skills (e.g., "You lacked Java knowledge").
+    - **FOCUS ONLY** on narrative structure.
+    - Ask: Was the 'Situation' clear? Was the 'Action' vague? Did the 'Result' have numbers?
+    - Example: "Your 'Action' section was too generic and didn't list specific steps. The 'Result' was missing quantifiable metrics."
+    
+    Field 2: "rewritten_answer"
+    - This is where you fix everything.
+    - Write a polished response using the Manager's keywords.
+    - Use Markdown bolding for the headers: **Situation:**, **Task:**, **Action:**, **Result:**.
+    
     Output Format:
     <thinking>
-    The manager wants more emphasis on 'System Design'. I will expand the 'Task' section...
+    The user had a good Situation but the Action was passive. No numbers in Result.
     </thinking>
     
     ```json
