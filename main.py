@@ -1,3 +1,4 @@
+from ast import Dict
 import os
 import sqlite3
 import json
@@ -185,6 +186,10 @@ manager_prompt = ChatPromptTemplate.from_template(
     
     CANDIDATE'S RESUME SUMMARY:
     {resume_text}
+
+    CRITICAL SKILL GAPS (FROM AUDIT)
+    The following skills were marked as MISSING in the candidate's resume:
+    {skill_gaps}
     
     INTERVIEW QUESTION:
     "{question}"
@@ -200,7 +205,11 @@ manager_prompt = ChatPromptTemplate.from_template(
     2. **Depth:** Is the answer vague or does it show specific technical knowledge mentioned in the requirements?
     3. **Compare Explicitly:** - Look at the **"Key Knowledge"** field in the data source. Did the candidate mention those specific keywords?
        - If the data says "Level 5", but the candidate sounds like a junior, point out the gap.
-    4. **Verdict:** Be direct. If they missed a key technical requirement, say it.
+    4. **Skill Demonstration:** Does the answer provide evidence for the {role} skills?
+    5. **Gap Mitigation:** specifically check if the answer helps cover any of the **Critical Skill Gaps** listed above. 
+       - If they demonstrate a missing skill here, acknowledge it enthusiastically.
+       - If they miss a chance to demonstrate a missing skill, point it out.
+    6. **Verdict:** Be direct and professional. If they missed a key technical requirement, say it.
     
     Keep your feedback professional but critical (approx 100 words). Focus on the *content* and *competence*, not just the communication style.
     """
@@ -269,6 +278,7 @@ class AnalyzeRequest(BaseModel):
     question: str
     target_role: str
     resume_text: str
+    skill_data: Optional[Dict] = None
 
 class MatchRequest(BaseModel):
     resume_text: str
@@ -342,10 +352,22 @@ async def analyze_stream(request: AnalyzeRequest):
         try:
             # --- STEP 1: CONTEXT & SKILLS ---
             yield json.dumps({"type": "step", "step_id": 1, "message": "Extracting Data..."}) + "\n"
-            
+
+            # Format Skill Gaps for the LLM
+            # We convert the JSON list into a readable string string
+            skill_gaps_str = "No specific gaps identified."
+            if request.skill_data and "missing" in request.skill_data:
+                missing = request.skill_data["missing"]
+                if missing:
+                    skill_gaps_str = "\n".join(
+                        [f"- {m['skill']} ({m.get('code', 'N/A')}): {m.get('gap', '')}" for m in missing]
+                    )
+
+            yield json.dumps({"type": "step", "step_id": 1, "message": "Reading Context..."}) + "\n"
+
             loop = asyncio.get_event_loop()
             detailed_skills_str = await loop.run_in_executor(None, get_detailed_skills, request.target_role)
-
+            
             # --- STEP 2: MANAGER ANALYSIS ---
             yield json.dumps({"type": "step", "step_id": 2, "message": "Manager Analysis..."}) + "\n"
             
@@ -355,6 +377,7 @@ async def analyze_stream(request: AnalyzeRequest):
                     "role": request.target_role,
                     "detailed_skills": detailed_skills_str,
                     "resume_text": request.resume_text[:2000],
+                    "skill_gaps": skill_gaps_str,
                     "question": request.question,
                     "student_answer": request.student_answer
                 }, 
