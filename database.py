@@ -8,6 +8,20 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_FILE = os.path.join(BASE_DIR, "skills.db")
 JSON_PATH = os.path.join(BASE_DIR, "questions.json")
 
+EXCEL_FILE = os.path.join(
+    BASE_DIR,
+    "jobsandskills-skillsfuture-skills-framework-dataset.xlsx"
+)
+
+# Excel sheet → CSV mapping
+EXCEL_SHEETS = {
+    "Role Description": "role_desc.csv",
+    "Role Tasks": "role_tasks.csv",
+    "Role Skills": "role_skills.csv",
+    "Skill Definitions": "skill_defs.csv",
+    "Skill Details": "skill_details.csv"
+}
+
 # Map your CSV files
 FILES = {
     "role_desc": "role_desc.csv",
@@ -19,8 +33,38 @@ FILES = {
 
 # ... imports and config ...
 
+def extract_excel_to_csv():
+    """
+    Extract required Excel sheets into CSV files.
+    Skips extraction if CSV already exists.
+    """
+    if not os.path.exists(EXCEL_FILE):
+        print(f"⚠️ Excel file not found: {EXCEL_FILE}")
+        return
+
+    print("📘 Extracting Excel sheets to CSV...")
+
+    for sheet_name, csv_name in EXCEL_SHEETS.items():
+        csv_path = os.path.join(BASE_DIR, csv_name)
+
+        # Skip if CSV already exists
+        if os.path.exists(csv_path):
+            print(f"   ⏭️  {csv_name} already exists, skipping")
+            continue
+
+        try:
+            df = pd.read_excel(EXCEL_FILE, sheet_name=sheet_name)
+            df.to_csv(csv_path, index=False)
+            print(f"   ✅ Created {csv_name}")
+        except Exception as e:
+            print(f"   ❌ Failed to extract {sheet_name}: {e}")
+
+
 def init_db():
     print("🚀 Starting Database Build...")
+
+    # 🔹 NEW: Extract Excel → CSV first
+    extract_excel_to_csv()
 
     # 1. CHECK FOR CRITICAL CSV FILES
     missing = []
