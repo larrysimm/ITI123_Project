@@ -175,6 +175,26 @@ def get_detailed_skills(role_name):
         print(f"Error fetching skills: {e}")
         return "Standard industry skills."
 
+def parse_llm_response(raw_text):
+    """
+    Extracts content inside <thinking> tags and separates it from the final answer.
+    Returns: (thinking_trace, final_answer)
+    """
+    # Regex to find content between <thinking> and </thinking>
+    # re.DOTALL allows the dot (.) to match newlines
+    thinking_match = re.search(r'<thinking>(.*?)</thinking>', raw_text, re.DOTALL)
+    
+    if thinking_match:
+        thinking_content = thinking_match.group(1).strip()
+        # Remove the thinking block from the original text to get the final answer
+        final_answer = re.sub(r'<thinking>.*?</thinking>', '', raw_text, flags=re.DOTALL).strip()
+    else:
+        # Fallback if AI forgets tags
+        thinking_content = "No thinking trace provided by AI."
+        final_answer = raw_text.strip()
+        
+    return thinking_content, final_answer
+
 # 4. PROMPTS
 
 # Manager Prompt (Standard Text Output)
@@ -212,7 +232,26 @@ manager_prompt = ChatPromptTemplate.from_template(
        - If they miss a chance to demonstrate a missing skill, point it out.
     6. **Verdict:** Be direct and professional. If they missed a key technical requirement, say it.
     
-    Keep your feedback professional but critical (approx 100 words). Focus on the *content* and *competence*, not just the communication style.
+    IMPORTANT OUTPUT INSTRUCTIONS:
+    --------------------------------------------------------
+    You must output your response in TWO parts:
+    
+    PART 1: Internal Thought Process (Wrapped in <thinking> tags)
+    - Briefly analyze the candidate's answer against the skill gaps.
+    - Note down which specific Reference Codes you need to cite.
+    - Decide if the tone should be harsh or approving.
+    
+    PART 2: Final Manager Feedback
+    - The actual response to the candidate (approx 100 words).
+    - Focus on content and competence.
+    
+    Example Format:
+    <thinking>
+    Candidate mentioned Python, but the Ref Code ICT-PRG-3001 requires Java. 
+    They missed the gap on 'Cloud Computing'. I need to be critical about that.
+    </thinking>
+    
+    [Your Final Critique Here]
     """
 )
 
@@ -372,7 +411,7 @@ async def analyze_stream(request: AnalyzeRequest):
             # --- STEP 2: MANAGER ANALYSIS ---
             yield json.dumps({"type": "step", "step_id": 2, "message": "Manager Analysis..."}) + "\n"
             
-            manager_res = await run_chain_with_fallback(
+            raw_manager_res = await run_chain_with_fallback(
                 manager_prompt,
                 {
                     "role": request.target_role,
@@ -385,16 +424,26 @@ async def analyze_stream(request: AnalyzeRequest):
                 "Manager Agent"
             )
 
+            # 🔹 NEW: Parse the Thinking Trace vs. Final Feedback
+            manager_thinking, manager_feedback_clean = parse_llm_response(raw_manager_res)
+
+            # 🚀 NEW: Send the Thinking Trace IMMEDIATELY to the frontend
+            yield json.dumps({
+                "type": "partial_update", 
+                "data": { "manager_thinking": manager_thinking }
+            }) + "\n"
+
             # --- STEP 3: COACH REFINEMENT ---
             yield json.dumps({"type": "step", "step_id": 3, "message": "Coach Refinement..."}) + "\n"
             
+            # 🔹 UPDATE: Send ONLY the clean feedback to the Coach (don't confuse it with the thinking trace)
             coach_raw_res = await run_chain_with_fallback(
                 coach_prompt,
-                {"manager_critique": manager_res, "student_answer": request.student_answer},
+                {"manager_critique": manager_feedback_clean, "student_answer": request.student_answer},
                 "Coach Agent"
             )
             
-            # (JSON Parsing Logic...)
+            # (JSON Parsing Logic remains the same)
             clean_json = re.sub(r"```json|```", "", coach_raw_res).strip()
             try:
                 coach_data = json.loads(clean_json)
@@ -404,19 +453,15 @@ async def analyze_stream(request: AnalyzeRequest):
                 coach_critique = "Could not parse feedback."
                 rewritten_answer = coach_raw_res
 
-            # --- STEP 4: FINAL DRAFTING (The Real Fix) ---
-            # 1. Send the visual update FIRST
+            # --- STEP 4: FINAL DRAFTING ---
             yield json.dumps({"type": "step", "step_id": 4, "message": "Drafting Response..."}) + "\n"
             
-            # 2. Force network flush so the UI updates BEFORE the LLM starts working
             await asyncio.sleep(0.05) 
 
-            # 3. NOW run the final heavy task (if you have a dedicated drafting step, put it here)
-            # If you don't have a 3rd LLM call, this step will be instant.
-            # Assuming you are just compiling data:
-            
+            # 🔹 UPDATE: Add 'manager_thinking' and use 'manager_feedback_clean'
             final_data = {
-                "manager_critique": manager_res,
+                "manager_critique": manager_feedback_clean, # The clean text for the card
+                "manager_thinking": manager_thinking,       # The trace for the "Brain" card
                 "coach_critique": coach_critique,    
                 "rewritten_answer": rewritten_answer 
             }
