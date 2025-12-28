@@ -15,11 +15,11 @@ EXCEL_FILE = os.path.join(
 
 # Excel sheet → CSV mapping
 EXCEL_SHEETS = {
-    "Role Description": "role_desc.csv",
-    "Role Tasks": "role_tasks.csv",
-    "Role Skills": "role_skills.csv",
-    "Skill Definitions": "skill_defs.csv",
-    "Skill Details": "skill_details.csv"
+    "Job Role_Description": "role_desc.csv",
+    "Job Role_CWF_KT": "role_tasks.csv",
+    "Job Role_TCS_CCS": "role_skills.csv",
+    "TSC_CCS_Key": "skill_defs.csv",
+    "TSC_CCS_K&A": "skill_details.csv"
 }
 
 # Map your CSV files
