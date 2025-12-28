@@ -463,8 +463,8 @@ async def analyze_stream(request: AnalyzeRequest):
                 "Coach Agent"
             )
             
-            # 2. ✂️ SPLIT DATA (Thinking vs. JSON)
-            coach_thinking, coach_json_str = parse_llm_response(raw_coach_res)
+            # 2. ✂️ SPLIT DATA (Thinking vs. The Rest)
+            coach_thinking, coach_potential_json = parse_llm_response(raw_coach_res)
 
             # 3. 🚀 SEND THINKING TRACE IMMEDIATELY
             yield json.dumps({
@@ -472,15 +472,31 @@ async def analyze_stream(request: AnalyzeRequest):
                 "data": { "coach_thinking": coach_thinking }
             }) + "\n"
             
-            # 4. Parse the JSON part
-            clean_json = re.sub(r"```json|```", "", coach_json_str).strip()
+            # 4. 🧹 ROBUST JSON CLEANUP
+            # Explain: Sometimes the LLM puts text before/after the JSON block.
+            # We look specifically for the content between the first { and the last }
             try:
-                coach_data = json.loads(clean_json)
-                coach_critique = coach_data.get("coach_critique", "Analysis failed.")
-                rewritten_answer = coach_data.get("rewritten_answer", coach_raw_res)
-            except:
-                coach_critique = "Could not parse feedback."
-                rewritten_answer = coach_json_str # Fallback to the text without thinking tags
+                # Remove markdown code blocks if present
+                clean_text = re.sub(r"```json\s*|\s*```", "", coach_potential_json).strip()
+                
+                # Find the start and end of the actual JSON object
+                start_index = clean_text.find('{')
+                end_index = clean_text.rfind('}') + 1
+                
+                if start_index != -1 and end_index != -1:
+                    json_str = clean_text[start_index:end_index]
+                    coach_data = json.loads(json_str)
+                    
+                    coach_critique = coach_data.get("coach_critique", "Analysis provided.")
+                    rewritten_answer = coach_data.get("rewritten_answer", "Answer generated.")
+                else:
+                    raise ValueError("No JSON object found")
+
+            except Exception as e:
+                print(f"JSON PARSE ERROR: {e}")
+                coach_critique = "Could not parse AI structure feedback."
+                # Fallback: Just show the raw text if parsing fails, but clean up the thinking tags
+                rewritten_answer = coach_potential_json
 
             # --- STEP 4: FINAL RESPONSE ---
             yield json.dumps({"type": "step", "step_id": 4, "message": "Drafting Response..."}) + "\n"
