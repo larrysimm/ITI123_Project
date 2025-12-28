@@ -2,16 +2,15 @@ import sqlite3
 import pandas as pd
 import os
 import json
+import requests  # <--- NEW IMPORT
 
 # --- CONFIGURATION ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_FILE = os.path.join(BASE_DIR, "skills.db")
 JSON_PATH = os.path.join(BASE_DIR, "questions.json")
 
-EXCEL_FILE = os.path.join(
-    BASE_DIR,
-    "jobsandskills-skillsfuture-skills-framework-dataset.xlsx"
-)
+EXCEL_FILE = os.path.join(BASE_DIR, "jobsandskills-skillsfuture-skills-framework-dataset.xlsx")
+GITHUB_EXCEL_URL = "https://raw.githubusercontent.com/larrysimm/skills-data-static/main/jobsandskills-skillsfuture-skills-framework-dataset.xlsx"
 
 # Excel sheet → CSV mapping
 EXCEL_SHEETS = {
@@ -31,15 +30,36 @@ FILES = {
     "skill_details": "skill_details.csv"
 }
 
-# ... imports and config ...
+def download_excel_from_github():
+    """
+    Downloads the Excel dataset from GitHub if it doesn't exist locally.
+    """
+    if os.path.exists(EXCEL_FILE):
+        print(f"📂 Excel file found locally: {EXCEL_FILE}")
+        return
+
+    print(f"⬇️ Downloading dataset from GitHub...")
+    print(f"   URL: {GITHUB_EXCEL_URL}")
+
+    try:
+        response = requests.get(GITHUB_EXCEL_URL)
+        response.raise_for_status()  # Raises error for 404/500 codes
+        
+        with open(EXCEL_FILE, "wb") as f:
+            f.write(response.content)
+            
+        print(f"✅ Download complete. Saved to: {EXCEL_FILE}")
+        
+    except Exception as e:
+        print(f"❌ Failed to download file: {e}")
+        print("   (Check if your GitHub URL is correct and the repo is Public)")
 
 def extract_excel_to_csv():
     """
     Extract required Excel sheets into CSV files.
-    Skips extraction if CSV already exists.
     """
     if not os.path.exists(EXCEL_FILE):
-        print(f"⚠️ Excel file not found: {EXCEL_FILE}")
+        print(f"⚠️ Excel file missing. Skipping extraction.")
         return
 
     print("📘 Extracting Excel sheets to CSV...")
@@ -47,27 +67,26 @@ def extract_excel_to_csv():
     for sheet_name, csv_name in EXCEL_SHEETS.items():
         csv_path = os.path.join(BASE_DIR, csv_name)
 
-        # Skip if CSV already exists
         if os.path.exists(csv_path):
-            print(f"   ⏭️  {csv_name} already exists, skipping")
-            continue
+            # Optional: Uncomment to skip if CSV exists (speeds up restarts)
+            # print(f"   ⏭️ {csv_name} exists, skipping.")
+            # continue
+            pass
 
         try:
             df = pd.read_excel(EXCEL_FILE, sheet_name=sheet_name)
             df.to_csv(csv_path, index=False)
-            print(f"   ✅ Created {csv_name}")
+            print(f"   ✅ Extracted: {csv_name}")
         except Exception as e:
-            print(f"   ❌ Failed to extract {sheet_name}: {e}")
+            print(f"   ❌ Failed to extract '{sheet_name}': {e}")
 
 def cleanup_csv_files():
     """
     Deletes generated CSV files after successful DB initialization.
     """
     print("🧹 Cleaning up CSV files...")
-
     for csv_file in FILES.values():
         csv_path = os.path.join(BASE_DIR, csv_file)
-
         if os.path.exists(csv_path):
             try:
                 os.remove(csv_path)
@@ -76,14 +95,17 @@ def cleanup_csv_files():
                 print(f"   ⚠️ Failed to delete {csv_file}: {e}")
 
 def init_db():
-    print("🚀 Starting Database Build...")
+    print("🚀 Starting Database Initialization...")
 
-    # 🔹 NEW: Extract Excel → CSV first
+    # 1️⃣ DOWNLOAD (If needed)
+    download_excel_from_github()
+
+    # 2️⃣ EXTRACT
     extract_excel_to_csv()
 
-    # 1. CHECK FOR CRITICAL CSV FILES
+    # Check for critical files
     missing = []
-    for key, filename in FILES.items():
+    for filename in FILES.values():
         if not os.path.exists(os.path.join(BASE_DIR, filename)):
             missing.append(filename)
     
@@ -93,55 +115,63 @@ def init_db():
     try:
         # --- PART A: PROCESS CSVs ---
         if not missing:
-            print("1️⃣  Processing Role Descriptions...")
+            print("⚙️  Processing CSV Data into SQLite...")
+
+            # 1. Descriptions
             df_desc = pd.read_csv(os.path.join(BASE_DIR, FILES["role_desc"]))
             df_desc = df_desc[['Job Role', 'Job Role Description', 'Performance Expectation']]
             df_desc.columns = ['role', 'description', 'expectations']
             df_desc.to_sql('role_descriptions', conn, if_exists='replace', index=False)
+            print("   -> Role Descriptions Loaded")
 
-            print("2️⃣  Processing Role Tasks...")
+            # 2. Tasks
             df_tasks = pd.read_csv(os.path.join(BASE_DIR, FILES["role_tasks"]))
             df_tasks = df_tasks[['Job Role', 'Critical Work Function', 'Key Tasks']]
             df_tasks.columns = ['role', 'function', 'task']
             df_tasks.to_sql('role_tasks', conn, if_exists='replace', index=False)
+            print("   -> Role Tasks Loaded")
 
-            print("3️⃣  Processing Role Skills...")
+            # 3. Role-Skill Map
             df_map = pd.read_csv(os.path.join(BASE_DIR, FILES["role_skills"]))
             df_map = df_map[['Job Role', 'TSC_CCS Title', 'TSC_CCS Code']]
             df_map.columns = ['role', 'skill_title', 'skill_code']
             df_map.to_sql('role_skills', conn, if_exists='replace', index=False)
+            print("   -> Role-Skill Map Loaded")
 
-            print("4️⃣  Processing Skill Definitions (With Proficiency)...")
+            # 4. Skill Definitions (with Proficiency check)
             df_info = pd.read_csv(os.path.join(BASE_DIR, FILES["skill_info"]))
             
-            # --- UPDATE: Check for Proficiency Column ---
-            # We look for 'Proficiency Level' or similar. 
-            # If your CSV uses a different name, change 'Proficiency Level' below.
-            cols_to_use = ['TSC Code', 'TSC_CCS Title', 'TSC_CCS Description']
+            # Smart Column Detection
+            base_cols = ['TSC Code', 'TSC_CCS Title', 'TSC_CCS Description']
+            target_cols = ['skill_code', 'title', 'description']
             
             if 'Proficiency Level' in df_info.columns:
-                cols_to_use.append('Proficiency Level')
-                df_info = df_info[cols_to_use]
-                df_info.columns = ['skill_code', 'title', 'description', 'proficiency']
+                df_info = df_info[base_cols + ['Proficiency Level']]
+                df_info.columns = target_cols + ['proficiency']
             else:
-                print("   ⚠️ 'Proficiency Level' column not found in skill_defs.csv. Using default.")
-                df_info = df_info[cols_to_use]
-                df_info.columns = ['skill_code', 'title', 'description']
-                df_info['proficiency'] = "Standard" # Default value
+                print("   ⚠️ Note: 'Proficiency Level' column missing. Using default.")
+                df_info = df_info[base_cols]
+                df_info.columns = target_cols
+                df_info['proficiency'] = "Standard"
 
             df_info.to_sql('skill_definitions', conn, if_exists='replace', index=False)
+            print("   -> Skill Definitions Loaded")
             
-            print("5️⃣  Processing Skill Details...")
+            # 5. Skill Details
             df_ka = pd.read_csv(os.path.join(BASE_DIR, FILES["skill_details"]))
             df_ka = df_ka[['TSC_CCS Code', 'Knowledge / Ability Items']]
             df_ka.columns = ['skill_code', 'detail_item']
             df_ka.to_sql('skill_details', conn, if_exists='replace', index=False)
-            
+            print("   -> Skill Details Loaded")
+
+            # Clean up temp files
+            cleanup_csv_files()
+
         else:
-            print(f"⚠️ Skipping CSV Import: Missing files {missing}")
+            print(f"⚠️ Skipping Data Import. Missing files: {missing}")
 
         # --- PART B: QUESTION BANK ---
-        print("6️⃣  Initializing Question Bank...")
+        print("📝 Initializing Question Bank...")
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS saved_questions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -150,24 +180,28 @@ def init_db():
         )
         """)
 
-        # (Load questions.json code remains the same as before...)
         if os.path.exists(JSON_PATH):
             try:
                 with open(JSON_PATH, "r", encoding="utf-8") as f:
                     questions_data = json.load(f)
+                    count = 0
                     for q in questions_data:
-                        cursor.execute(
-                            "INSERT OR IGNORE INTO saved_questions (question_text, category) VALUES (?, ?)", 
-                            (q["text"], q.get("category", "General"))
-                        )
-            except Exception as e: print(f"Error loading questions: {e}")
+                        try:
+                            cursor.execute(
+                                "INSERT OR IGNORE INTO saved_questions (question_text, category) VALUES (?, ?)", 
+                                (q["text"], q.get("category", "General"))
+                            )
+                            count += 1
+                        except: pass
+                    print(f"   -> Loaded {count} questions from JSON.")
+            except Exception as e: 
+                print(f"   ⚠️ Error loading questions.json: {e}")
         
         conn.commit()
-        print(f"✅ SUCCESS! Database updated at {DB_FILE}")
-        cleanup_csv_files()
+        print(f"✅ SUCCESS! Database ready at: {DB_FILE}")
 
     except Exception as e:
-        print(f"❌ DATABASE ERROR: {e}")
+        print(f"❌ DATABASE CRITICAL ERROR: {e}")
     finally:
         conn.close()
 
