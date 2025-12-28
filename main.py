@@ -279,8 +279,9 @@ coach_prompt = ChatPromptTemplate.from_template(
     - Decide how to weave in the missing skills the Manager asked for.
     
     PART 2: Final JSON Output
-    - Provide the structural feedback and the rewritten answer in strict JSON format.
-    
+    - "coach_critique": A direct critique of the ORIGINAL answer's structure. (e.g., "Your 'Action' section was too vague and you completely missed the 'Result'.")
+    - "rewritten_answer": The fully polished, STAR-formatted response.
+
     Output Format:
     <thinking>
     The manager wants more emphasis on 'System Design'. I will expand the 'Task' section...
@@ -288,7 +289,7 @@ coach_prompt = ChatPromptTemplate.from_template(
     
     ```json
     {{
-        "coach_critique": "I have restructured your answer to focus on...",
+        "coach_critique": "Your original answer failed to follow the STAR method. You combined Situation and Task, and your Result lacked any quantifiable metrics.",
         "rewritten_answer": "**Situation:** ... **Task:** ... **Action:** ... **Result:** ..."
     }}
     ```
