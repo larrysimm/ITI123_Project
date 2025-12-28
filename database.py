@@ -59,6 +59,21 @@ def extract_excel_to_csv():
         except Exception as e:
             print(f"   ❌ Failed to extract {sheet_name}: {e}")
 
+def cleanup_csv_files():
+    """
+    Deletes generated CSV files after successful DB initialization.
+    """
+    print("🧹 Cleaning up CSV files...")
+
+    for csv_file in FILES.values():
+        csv_path = os.path.join(BASE_DIR, csv_file)
+
+        if os.path.exists(csv_path):
+            try:
+                os.remove(csv_path)
+                print(f"   🗑️ Deleted {csv_file}")
+            except Exception as e:
+                print(f"   ⚠️ Failed to delete {csv_file}: {e}")
 
 def init_db():
     print("🚀 Starting Database Build...")
@@ -149,6 +164,7 @@ def init_db():
         
         conn.commit()
         print(f"✅ SUCCESS! Database updated at {DB_FILE}")
+        cleanup_csv_files()
 
     except Exception as e:
         print(f"❌ DATABASE ERROR: {e}")
