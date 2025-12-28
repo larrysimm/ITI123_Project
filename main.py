@@ -21,6 +21,7 @@ from google.api_core.exceptions import ResourceExhausted
 from pypdf import PdfReader
 import io
 import database
+from typing import Optional, Dict, List
 
 # 1. SETUP
 load_dotenv()
