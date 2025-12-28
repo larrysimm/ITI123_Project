@@ -472,31 +472,28 @@ async def analyze_stream(request: AnalyzeRequest):
                 "data": { "coach_thinking": coach_thinking }
             }) + "\n"
             
-            # 4. 🧹 ROBUST JSON CLEANUP
-            # Explain: Sometimes the LLM puts text before/after the JSON block.
-            # We look specifically for the content between the first { and the last }
+            # 4. 🧹 ROBUST JSON CLEANUP (The Fix)
             try:
-                # Remove markdown code blocks if present
-                clean_text = re.sub(r"```json\s*|\s*```", "", coach_potential_json).strip()
-                
-                # Find the start and end of the actual JSON object
-                start_index = clean_text.find('{')
-                end_index = clean_text.rfind('}') + 1
+                # A. Find the braces manually to ignore markdown filler
+                start_index = coach_potential_json.find('{')
+                end_index = coach_potential_json.rfind('}') + 1
                 
                 if start_index != -1 and end_index != -1:
-                    json_str = clean_text[start_index:end_index]
-                    coach_data = json.loads(json_str)
+                    json_str = coach_potential_json[start_index:end_index]
+                    
+                    # B. CRITICAL FIX: strict=False allows newlines inside the JSON strings
+                    coach_data = json.loads(json_str, strict=False)
                     
                     coach_critique = coach_data.get("coach_critique", "Analysis provided.")
                     rewritten_answer = coach_data.get("rewritten_answer", "Answer generated.")
                 else:
-                    raise ValueError("No JSON object found")
+                    raise ValueError("No JSON brackets found in response.")
 
             except Exception as e:
                 print(f"JSON PARSE ERROR: {e}")
                 coach_critique = "Could not parse AI structure feedback."
-                # Fallback: Just show the raw text if parsing fails, but clean up the thinking tags
-                rewritten_answer = coach_potential_json
+                # Fallback: Strip the markdown tags manually so it's readable
+                rewritten_answer = re.sub(r"```json\s*|\s*```", "", coach_potential_json).strip()
 
             # --- STEP 4: FINAL RESPONSE ---
             yield json.dumps({"type": "step", "step_id": 4, "message": "Drafting Response..."}) + "\n"
