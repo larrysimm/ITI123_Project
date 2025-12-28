@@ -11,3 +11,4 @@ python-multipart
 pandas
 google-api-core
 pydantic
+openpyxl
