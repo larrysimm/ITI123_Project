@@ -1,27 +1,37 @@
-from ast import Dict
 import os
 import sqlite3
 import json
 import asyncio
 import re  # <--- NEW: For cleaning JSON output
-from dotenv import load_dotenv
+import json
+import io
+import database
+import logging
 
+from ast import Dict
+from typing import Optional, Dict, List
+from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-
-# AI Imports
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from google.api_core.exceptions import ResourceExhausted
-
 from pypdf import PdfReader
-import io
-import database
-from typing import Optional, Dict, List
+
+# --- LOGGER SETUP ---
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.FileHandler("backend.log"), # Saves logs to this file
+        logging.StreamHandler()             # Prints logs to terminal
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # 1. SETUP
 load_dotenv()
@@ -56,20 +66,20 @@ async def run_chain_with_fallback(prompt_template, inputs, step_name="AI"):
         chain = prompt_template | gemini_llm | StrOutputParser()
         return await chain.ainvoke(inputs)
     except ResourceExhausted:
-        print(f"⚠️ GEMINI QUOTA HIT ({step_name}). Switching to GROQ...")
+        # CHANGED: print -> logger.warning
+        logger.warning(f"⚠️ GEMINI QUOTA HIT ({step_name}). Switching to GROQ...")
         chain = prompt_template | groq_llm | StrOutputParser()
         return await chain.ainvoke(inputs)
     except Exception as e:
-        print(f"⚠️ GEMINI ERROR ({step_name}): {e}. Switching to GROQ...")
+        # CHANGED: print -> logger.error with traceback
+        logger.error(f"⚠️ GEMINI ERROR ({step_name}): {e}. Switching to GROQ...", exc_info=True)
         try:
             chain = prompt_template | groq_llm | StrOutputParser()
             return await chain.ainvoke(inputs)
         except Exception as groq_e:
+            logger.critical(f"Both AI Engines Failed: {str(groq_e)}", exc_info=True)
             raise Exception(f"Both AI Engines Failed: {str(groq_e)}")
         
-        import re
-import json
-
 def extract_clean_json(text):
     """
     Strips '```json' formatting and finds the actual JSON object { ... }
@@ -133,6 +143,8 @@ def get_detailed_skills(role_name):
         cursor = conn.cursor()
         
         # Added s.skill_code to the selection
+        # ADDED: Log entry
+        logger.info(f"Fetching detailed skills spec for: {role_name}")
         query = """
             SELECT 
                 s.title, 
@@ -169,10 +181,11 @@ def get_detailed_skills(role_name):
             skills_text += f"Key Knowledge: {knowledge}\n"
             skills_text += "-" * 20 + "\n"
         
+        logger.info(f"Successfully retrieved {len(rows)} skills for {role_name}")
         return skills_text
 
     except Exception as e:
-        print(f"Error fetching skills: {e}")
+        logger.error(f"Error fetching skills: {e}", exc_info=True)
         return "Standard industry skills."
 
 def parse_llm_response(raw_text):
@@ -526,6 +539,7 @@ async def analyze_stream(request: AnalyzeRequest):
 
 @app.post("/match_skills")
 async def match_skills(request: Request):
+    logger.info("Received request for /match_skills")
     # 1. Parse Input
     data = await request.json()
     resume_text = data.get("resume_text", "")
@@ -534,6 +548,7 @@ async def match_skills(request: Request):
     # 2. Define the Stream Generator
     async def generate_updates():
         try:
+            logger.info(f"Starting skill match analysis for role: {target_role}")
             # === STEP 1: DB LOOKUP ===
             yield json.dumps({
                 "type": "status", 
@@ -576,6 +591,7 @@ async def match_skills(request: Request):
 
             # Handle case where DB is empty
             if not detailed_skills:
+                 logger.warning(f"No skills found for {target_role}, using default fallback.")
                  detailed_skills = [{"skill": "General Competency", "code": "N/A", "level": "Standard", "required_knowledge": "General professional skills"}]
 
             # --- C. NOW WE CAN SAFELY COUNT ---
@@ -607,12 +623,16 @@ async def match_skills(request: Request):
                 "resume_text": resume_text[:5000]
             }
 
+            logger.info("Sending prompt to AI...")
+
             # Run the AI Chain
             ai_response_str = await run_chain_with_fallback(
                 match_skills_prompt, 
                 inputs, 
                 step_name="Skill Matcher"
             )
+
+            logger.info("AI Response received successfully.")
 
             # === STEP 3: FINALIZING ===
             yield json.dumps({
@@ -624,12 +644,15 @@ async def match_skills(request: Request):
             analysis_result = extract_clean_json(ai_response_str)
             
             if not analysis_result:
+                logger.error("Failed to parse JSON from AI response.")
+                logger.debug(f"Raw AI Output: {ai_response_str}") # Helps debug bad JSON
                 analysis_result = {
                     "matched_skills": [],
                     "missing_skills": [{"skill": "Error", "code": "N/A", "gap": "AI Analysis failed to parse."}]
                 }
 
             # --- SEND FINAL RESULT ---
+            logger.info("Stream complete. Sending results.")
             yield json.dumps({"type": "result", "data": analysis_result}) + "\n"
 
         except Exception as e:
