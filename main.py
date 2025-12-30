@@ -6,7 +6,7 @@ import asyncio
 import re  # <--- NEW: For cleaning JSON output
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -31,7 +31,7 @@ database.init_db()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["https://larrysim-iti123-project.netlify.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
