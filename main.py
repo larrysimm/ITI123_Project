@@ -536,8 +536,12 @@ async def match_skills(request: Request):
         try:
             # --- STEP 1: DB LOOKUP ---
             # Send status update
-            yield json.dumps({"type": "status", "step": 1, "message": "Fetching Skills from DB..."}) + "\n"
-            
+            yield json.dumps({
+                "type": "status", 
+                "step": 1, 
+                "message": f"Searching DB for '{target_role}' standards..."
+            }) + "\n"
+
             # (Your existing DB Logic)
             conn = sqlite3.connect("skills.db")
             conn.row_factory = sqlite3.Row
@@ -571,15 +575,34 @@ async def match_skills(request: Request):
             if not detailed_skills:
                  detailed_skills = [{"skill": "General Competency", "code": "N/A", "level": "Standard", "required_knowledge": "General professional skills"}]
 
+            # ⚡ DYNAMIC UPDATE: Tell Frontend exactly what we found
+            count = len(detailed_skills)
+            yield json.dumps({
+                "type": "status", 
+                "step": 2, 
+                "message": f"Found {count} core competencies for {target_role}."
+            }) + "\n"
+
             # --- STEP 2: AI ANALYSIS ---
-            yield json.dumps({"type": "status", "step": 2, "message": "AI Analyzing Gaps..."}) + "\n"
-            
+            resume_snippet = resume_text[:30].replace("\n", " ")
+            yield json.dumps({
+                "type": "status", 
+                "step": 2, 
+                "message": f"Analyzing resume starting with: '{resume_snippet}...'"
+            }) + "\n"
+
             inputs = {
                 "role": target_role,
                 "role_desc": f"Professional {target_role}",
                 "detailed_skills": json.dumps(detailed_skills, indent=2),
                 "resume_text": resume_text[:5000]
             }
+
+            yield json.dumps({
+                "type": "status", 
+                "step": 2, 
+                "message": "AI is reasoning on skill gaps..."
+            }) + "\n"
 
             # Run the Chain
             ai_response_str = await run_chain_with_fallback(
@@ -589,7 +612,11 @@ async def match_skills(request: Request):
             )
 
             # --- STEP 3: FINALIZING ---
-            yield json.dumps({"type": "status", "step": 3, "message": "Formatting Results..."}) + "\n"
+            yield json.dumps({
+                "type": "status", 
+                "step": 3, 
+                "message": "Parsing AI reasoning into JSON..."
+            }) + "\n"
             
             analysis_result = extract_clean_json(ai_response_str)
             
