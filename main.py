@@ -550,7 +550,7 @@ async def match_skills(request: Request):
                 SELECT 
                     COALESCE(s.title, rs.skill_title) as title, 
                     rs.skill_code, 
-                    s.proficiency,
+                    rs.proficiency,             -- ✅ CORRECT (New location)
                     GROUP_CONCAT(d.detail_item, '; ') as knowledge_list
                 FROM role_skills rs 
                 LEFT JOIN skill_definitions s ON rs.skill_code = s.skill_code 
@@ -569,7 +569,8 @@ async def match_skills(request: Request):
                 detailed_skills.append({
                     "skill": row["title"],
                     "code": row["skill_code"],
-                    "level": row["proficiency"] if row["proficiency"] else "Standard",
+                    # This reads the column we just selected above
+                    "level": row["proficiency"] if row["proficiency"] else "Standard", 
                     "required_knowledge": (row["knowledge_list"][:300] + "...") if row["knowledge_list"] else "General competency"
                 })
 
