@@ -534,13 +534,9 @@ async def match_skills(request: Request):
     # 2. Define the Generator (This streams data to the client)
     async def generate_updates():
         try:
-            # --- STEP 1: DB LOOKUP ---
-            # Send status update
-            yield json.dumps({
-                "type": "status", 
-                "step": 1, 
-                "message": f"Searching DB for '{target_role}' standards..."
-            }) + "\n"
+            # === STEP 1: DATABASE ===
+            yield json.dumps({"step": 1, "message": f"Querying DB for role: {target_role}"}) + "\n"
+            await asyncio.sleep(0.3) # Fake tiny delay for visual effect
 
             # (Your existing DB Logic)
             conn = sqlite3.connect("skills.db")
@@ -561,35 +557,35 @@ async def match_skills(request: Request):
             """
             cursor.execute(query, (target_role,))
             rows = cursor.fetchall()
-            conn.close()
+            conn.close()# (Your DB Logic)
+            conn = sqlite3.connect("skills.db")
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
             
-            detailed_skills = []
-            for row in rows:
-                detailed_skills.append({
-                    "skill": row["title"],
-                    "code": row["skill_code"],
-                    "level": row["proficiency"] if row["proficiency"] else "Standard",
-                    "required_knowledge": (row["knowledge_list"][:300] + "...") if row["knowledge_list"] else "General competency"
-                })
+            yield json.dumps({"step": 1, "message": "Executing SQL selection..."}) + "\n"
+            
+            cursor.execute("SELECT * FROM role_skills WHERE role = ?", (target_role,))
+            rows = cursor.fetchall()
+            conn.close()
 
-            if not detailed_skills:
-                 detailed_skills = [{"skill": "General Competency", "code": "N/A", "level": "Standard", "required_knowledge": "General professional skills"}]
-
-            # ⚡ DYNAMIC UPDATE: Tell Frontend exactly what we found
-            count = len(detailed_skills)
-            yield json.dumps({
-                "type": "status", 
-                "step": 2, 
-                "message": f"Found {count} core competencies for {target_role}."
-            }) + "\n"
-
-            # --- STEP 2: AI ANALYSIS ---
-            resume_snippet = resume_text[:30].replace("\n", " ")
-            yield json.dumps({
-                "type": "status", 
-                "step": 2, 
-                "message": f"Analyzing resume starting with: '{resume_snippet}...'"
-            }) + "\n"
+            if len(rows) == 0:
+                 yield json.dumps({"step": 1, "message": "⚠️ No specific standards found, using defaults."}) + "\n"
+            else:
+                 yield json.dumps({"step": 1, "message": f"✔ Retrieved {len(rows)} standard skills."}) + "\n"
+            
+            # === STEP 2: AI ANALYSIS ===
+            yield json.dumps({"step": 2, "message": "Initializing LLM Context..."}) + "\n"
+            
+            # Send a "Thinking" header
+            yield json.dumps({"step": 2, "message": "<THINKING_TRACE_STARTED>"}) + "\n"
+            yield json.dumps({"step": 2, "message": f"Context: Comparing resume ({len(resume_text)} chars) against {len(rows)} skills."}) + "\n"
+            
+            # Simulate "Thinking" steps (since we can't easily stream raw chain thoughts yet)
+            yield json.dumps({"step": 2, "message": "Analyzing 'Proficiency' levels..."}) + "\n"
+            await asyncio.sleep(0.5)
+            yield json.dumps({"step": 2, "message": "Detecting missing keywords..."}) + "\n"
+            await asyncio.sleep(0.5)
+            yield json.dumps({"step": 2, "message": "Verifying evidence in work history..."}) + "\n"
 
             inputs = {
                 "role": target_role,
@@ -598,12 +594,6 @@ async def match_skills(request: Request):
                 "resume_text": resume_text[:5000]
             }
 
-            yield json.dumps({
-                "type": "status", 
-                "step": 2, 
-                "message": "AI is reasoning on skill gaps..."
-            }) + "\n"
-
             # Run the Chain
             ai_response_str = await run_chain_with_fallback(
                 match_skills_prompt, 
@@ -611,13 +601,15 @@ async def match_skills(request: Request):
                 step_name="Skill Matcher"
             )
 
+            yield json.dumps({"step": 3, "message": "Formatting JSON output..."}) + "\n"
+
             # --- STEP 3: FINALIZING ---
             yield json.dumps({
                 "type": "status", 
                 "step": 3, 
                 "message": "Parsing AI reasoning into JSON..."
             }) + "\n"
-            
+
             analysis_result = extract_clean_json(ai_response_str)
             
             if not analysis_result:
@@ -629,7 +621,7 @@ async def match_skills(request: Request):
             # --- SEND FINAL RESULT ---
             # We send the final data with type="result"
             yield json.dumps({"type": "result", "data": analysis_result}) + "\n"
-
+            
         except Exception as e:
             print(f"Stream Error: {e}")
             yield json.dumps({"type": "error", "message": str(e)}) + "\n"
