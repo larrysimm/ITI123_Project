@@ -525,93 +525,87 @@ async def analyze_stream(request: AnalyzeRequest):
     return StreamingResponse(event_generator(), media_type="application/x-ndjson")
 
 @app.post("/match_skills")
-async def match_skills(request: MatchRequest):
-    try:
-        print(f"🔍 MATCH REQUEST for Role: '{request.target_role}'")
-        
-        conn = sqlite3.connect("skills.db")
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        # 1. Get Role Description
-        cursor.execute("SELECT description FROM role_descriptions WHERE role = ?", (request.target_role,))
-        desc_row = cursor.fetchone()
-        role_desc = desc_row["description"] if desc_row else f"A professional {request.target_role} role."
+async def match_skills(request: Request):
+    # 1. Parse Input
+    data = await request.json()
+    resume_text = data.get("resume_text", "")
+    target_role = data.get("target_role", "Software Engineer")
 
-        # 2. Get Skills (ROBUST QUERY)
-        # We use LEFT JOIN so we don't lose the skill if the definition is missing.
-        # We also select rs.skill_title as a backup if s.title is null.
-        query = """
-            SELECT 
-                COALESCE(s.title, rs.skill_title) as title, 
-                rs.skill_code, 
-                s.proficiency,
-                GROUP_CONCAT(d.detail_item, '; ') as knowledge_list
-            FROM role_skills rs 
-            LEFT JOIN skill_definitions s ON rs.skill_code = s.skill_code 
-            LEFT JOIN skill_details d ON rs.skill_code = d.skill_code
-            WHERE rs.role = ? 
-            GROUP BY rs.skill_code
-            LIMIT 8
-        """
-        
-        cursor.execute(query, (request.target_role,))
-        rows = cursor.fetchall()
-        
-        print(f"   found {len(rows)} skills in DB.") # <--- DEBUG PRINT
+    # 2. Define the Generator (This streams data to the client)
+    async def generate_updates():
+        try:
+            # --- STEP 1: DB LOOKUP ---
+            # Send status update
+            yield json.dumps({"type": "status", "step": 1, "message": "Fetching Skills from DB..."}) + "\n"
+            
+            # (Your existing DB Logic)
+            conn = sqlite3.connect("skills.db")
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            query = """
+                SELECT 
+                    COALESCE(s.title, rs.skill_title) as title, 
+                    rs.skill_code, 
+                    s.proficiency,
+                    GROUP_CONCAT(d.detail_item, '; ') as knowledge_list
+                FROM role_skills rs 
+                LEFT JOIN skill_definitions s ON rs.skill_code = s.skill_code 
+                LEFT JOIN skill_details d ON rs.skill_code = d.skill_code
+                WHERE rs.role = ? 
+                GROUP BY rs.skill_code
+                LIMIT 8
+            """
+            cursor.execute(query, (target_role,))
+            rows = cursor.fetchall()
+            conn.close()
+            
+            detailed_skills = []
+            for row in rows:
+                detailed_skills.append({
+                    "skill": row["title"],
+                    "code": row["skill_code"],
+                    "level": row["proficiency"] if row["proficiency"] else "Standard",
+                    "required_knowledge": (row["knowledge_list"][:300] + "...") if row["knowledge_list"] else "General competency"
+                })
 
-        detailed_skills = []
-        for row in rows:
-            detailed_skills.append({
-                "skill": row["title"],
-                "code": row["skill_code"],
-                "level": row["proficiency"] if row["proficiency"] else "Standard",
-                "required_knowledge": (row["knowledge_list"][:300] + "...") if row["knowledge_list"] else "General competency"
-            })
-        
-        conn.close()
+            if not detailed_skills:
+                 detailed_skills = [{"skill": "General Competency", "code": "N/A", "level": "Standard", "required_knowledge": "General professional skills"}]
 
-        # Fallback if DB is empty
-        if not detailed_skills:
-            print("   ⚠️ No skills found. Using AI fallback.")
-            detailed_skills = [
-                {"skill": "System Architecture", "code": "N/A", "level": "Intermediate", "required_knowledge": "General System Design"},
-                {"skill": "Software Development", "code": "N/A", "level": "Intermediate", "required_knowledge": "Coding Standards"}
-            ]
-
-        # 3. AI Analysis
-        # Ensure we pass the 'code' field to the AI so it doesn't return N/A
-        inputs = {
-            "role": request.target_role,
-            "role_desc": role_desc,
-            "detailed_skills": json.dumps(detailed_skills, indent=2),
-            "resume_text": request.resume_text[:5000]
-        }
-
-        ai_response_str = await run_chain_with_fallback(
-            match_skills_prompt, 
-            inputs, 
-            step_name="Skill Matcher"
-        )
-        
-        # --- FIX: USE THE CLEANER FUNCTION ---
-        result = extract_clean_json(ai_response_str)
-        
-        # Validation
-        if not result:
-            print(f"⚠️ JSON Parse Failed. Raw output:\n{ai_response_str}")
-            return {
-                "matched": [], 
-                "missing": [{"skill": "Parsing Error", "code": "N/A", "gap": "Could not format analysis."}], 
-                "role_desc": role_desc
+            # --- STEP 2: AI ANALYSIS ---
+            yield json.dumps({"type": "status", "step": 2, "message": "AI Analyzing Gaps..."}) + "\n"
+            
+            inputs = {
+                "role": target_role,
+                "role_desc": f"Professional {target_role}",
+                "detailed_skills": json.dumps(detailed_skills, indent=2),
+                "resume_text": resume_text[:5000]
             }
-        
-        return {
-            "matched": result.get("matched_skills", []),
-            "missing": result.get("missing_skills", []),
-            "role_desc": role_desc
-        }
 
-    except Exception as e:
-        print(f"❌ MATCH ERROR: {e}")
-        return {"matched": [], "missing": [], "role_desc": "System Error."}
+            # Run the Chain
+            ai_response_str = await run_chain_with_fallback(
+                match_skills_prompt, 
+                inputs, 
+                step_name="Skill Matcher"
+            )
+
+            # --- STEP 3: FINALIZING ---
+            yield json.dumps({"type": "status", "step": 3, "message": "Formatting Results..."}) + "\n"
+            
+            analysis_result = extract_clean_json(ai_response_str)
+            
+            if not analysis_result:
+                analysis_result = {
+                    "matched_skills": [],
+                    "missing_skills": [{"skill": "Error", "code": "N/A", "gap": "AI Analysis failed to parse."}]
+                }
+
+            # --- SEND FINAL RESULT ---
+            # We send the final data with type="result"
+            yield json.dumps({"type": "result", "data": analysis_result}) + "\n"
+
+        except Exception as e:
+            print(f"Stream Error: {e}")
+            yield json.dumps({"type": "error", "message": str(e)}) + "\n"
+
+    # Return the stream
+    return StreamingResponse(generate_updates(), media_type="application/x-ndjson")
