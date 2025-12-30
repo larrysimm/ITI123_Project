@@ -208,6 +208,20 @@ def parse_llm_response(raw_text):
         
     return thinking_content, final_answer
 
+def redact_pii(text):
+    """
+    Removes personal contact info (Email & Phone) from text 
+    before sending to AI.
+    """
+    # 1. Redact Emails (Basic Pattern)
+    text = re.sub(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '[EMAIL_REDACTED]', text)
+    
+    # 2. Redact Phone Numbers (Targets 8-digit SG numbers and common formats)
+    # This regex looks for 8-digit numbers that might be phone numbers
+    text = re.sub(r'\b[896]\d{7}\b', '[PHONE_REDACTED]', text)
+    
+    return text
+
 # 4. PROMPTS
 
 # Manager Prompt (Standard Text Output)
@@ -606,8 +620,10 @@ async def match_skills(request: Request):
             yield json.dumps({
                 "type": "status", 
                 "step": 2, 
-                "message": "Initializing AI Analyst..."
+                "message": "Anonymizing data & Initializing AI Analyst..."
             }) + "\n"
+
+            clean_resume_text = redact_pii(resume_text[:5000])
 
             # Simulate thinking steps for the UI trace
             await asyncio.sleep(0.2)
@@ -620,7 +636,7 @@ async def match_skills(request: Request):
                 "role": target_role,
                 "role_desc": f"Professional {target_role}",
                 "detailed_skills": json.dumps(detailed_skills, indent=2),
-                "resume_text": resume_text[:5000]
+                "resume_text": clean_resume_text[:5000]
             }
 
             logger.info("Sending prompt to AI...")
