@@ -210,17 +210,44 @@ def parse_llm_response(raw_text):
 
 def redact_pii(text):
     """
-    Removes personal contact info (Email & Phone) from text 
-    before sending to AI.
+    Aggressively removes PII (Email, Phone, Address, Name) 
+    before sending data to the AI.
     """
-    # 1. Redact Emails (Basic Pattern)
+    
+    # 1. EMAILS
     text = re.sub(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '[EMAIL_REDACTED]', text)
     
-    # 2. Redact Phone Numbers (Targets 8-digit SG numbers and common formats)
-    # This regex looks for 8-digit numbers that might be phone numbers
-    text = re.sub(r'\b[896]\d{7}\b', '[PHONE_REDACTED]', text)
+    # 2. PHONE NUMBERS (SG 8-digit & Intl formats)
+    # Matches: 91234567, (+65) 91234567, 65-9123-4567
+    text = re.sub(r'(?:\+?65[- ]?)?[689]\d{3}[- ]?\d{4}\b', '[PHONE_REDACTED]', text)
+
+    # 3. SINGAPORE ADDRESSES (The "Fingerprint")
+    # A. Postal Codes (6 digits, often appearing as "Singapore 123456" or just "123456")
+    text = re.sub(r'\b(?:Singapore\s*)?\d{6}\b', '[POSTAL_CODE]', text)
     
-    return text
+    # B. Unit Numbers (e.g., #04-123)
+    text = re.sub(r'#\d{1,4}-\d{1,5}', '[UNIT_NO]', text)
+    
+    # C. HDB Block Numbers (e.g., Blk 123, Block 10A)
+    text = re.sub(r'\b(Blk|Block)\s*\d+[A-Za-z]?\b', '[BLOCK_NO]', text, flags=re.IGNORECASE)
+
+    # 4. NAMES (Heuristic Approach)
+    # A. Explicit labels like "Name: John Doe"
+    text = re.sub(r'(?i)(Name|Candidate):\s*([A-Z][a-z]+ [A-Z][a-z]+)', r'\1: [NAME_REDACTED]', text)
+
+    # B. The "Header" Assumption:
+    # On most resumes, the first non-empty line is the Name. 
+    # If the first line is short (< 30 chars) and capitalized, redact it.
+    lines = text.split('\n')
+    for i in range(len(lines)):
+        line = lines[i].strip()
+        if line:
+            # If line is short and looks like a name (mostly letters, no weird symbols)
+            if len(line) < 30 and re.match(r'^[A-Za-z \.]+$', line):
+                 lines[i] = "[NAME_REDACTED_HEADER]"
+            break # Only try to redact the first valid line
+            
+    return "\n".join(lines)
 
 # 4. PROMPTS
 
