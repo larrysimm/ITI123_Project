@@ -22,6 +22,8 @@ from langchain_core.output_parsers import StrOutputParser
 from google.api_core.exceptions import ResourceExhausted
 from pypdf import PdfReader
 
+STAR_GUIDE_TEXT = "Standard STAR Method principles." # Default fallback
+
 # --- LOGGER SETUP ---
 logging.basicConfig(
     level=logging.INFO,
@@ -46,6 +48,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 👇 INSERT THIS BLOCK HERE 👇
+@app.on_event("startup")
+async def startup_event():
+    logger.info(">>> SERVER STARTING UP <<<")
+    
+    # Load the PDF Guide into memory
+    load_star_guide()
+    
+    logger.info("Server is ready to accept requests.")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info(">>> SERVER SHUTTING DOWN <<<")
 
 # 2. DUAL AI SETUP
 gemini_llm = ChatGoogleGenerativeAI(
@@ -253,6 +269,27 @@ def redact_pii(text):
             break # Only try to redact the first valid line
             
     return "\n".join(lines)
+
+def load_star_guide():
+    """
+    Loads the STAR Method Guide from a local PDF into memory.
+    """
+    global STAR_GUIDE_TEXT
+    guide_path = "star_guide.pdf"  # <--- Name your file this
+    
+    if os.path.exists(guide_path):
+        try:
+            reader = PdfReader(guide_path)
+            text = ""
+            for page in reader.pages:
+                text += page.extract_text() or ""
+            STAR_GUIDE_TEXT = text
+            logger.info(f"✅ STAR Guide loaded successfully ({len(text)} chars).")
+        except Exception as e:
+            logger.error(f"❌ Failed to load STAR Guide: {e}")
+            STAR_GUIDE_TEXT = "Standard STAR Method principles." # Fallback
+    else:
+        logger.warning("⚠️ 'star_guide.pdf' not found. Using default AI knowledge.")
 
 # 4. PROMPTS
 
@@ -479,7 +516,7 @@ async def upload_resume(file: UploadFile = File(...)):
         logger.warning("Uploaded PDF has very little text. Likely a scanned image.")
         # You might want to return an error here or append a warning
         text += "\n[SYSTEM NOTE: This file appears to be an image scan. Text extraction may be incomplete.]"
-        
+
     return {"filename": file.filename, "extracted_text": text[:4000]}
 
 @app.post("/analyze_stream")
