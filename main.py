@@ -366,7 +366,7 @@ coach_prompt = ChatPromptTemplate.from_template(
     2. **Candidate's Original Answer:** "{student_answer}"
     
     YOUR GOAL:
-    1. **Audit the Structure:** Check if the *Candidate's Original Answer* ased STRICTLY on the <OFFICIAL_STAR_GUIDE> above.
+    1. **Audit the Structure:** Check if the *Candidate's Original Answer* based STRICTLY on the <OFFICIAL_STAR_GUIDE> above.
     2. **Rewrite the Content:**Create a perfect answer that fixes the structure using the examples in the guide as a style reference AND adds the technical skills requested by the Manager.
     
     IMPORTANT OUTPUT INSTRUCTIONS:
@@ -385,7 +385,7 @@ coach_prompt = ChatPromptTemplate.from_template(
     - Example: "Your 'Action' section was too generic and didn't list specific steps. The 'Result' was missing quantifiable metrics."
     
     Field 2: "rewritten_answer"
-    - If the original answer was incomprehensible, Do not try to salvage it, INSTEAD, output the "HOW TO PREPARE FOR A BEHAVIORAL INTERVIEW" from the [STAR_GUIDE] to teach the user the basics. 
+    - If the original answer was incomprehensible, Do not try to salvage it, INSTEAD, let the user know and give advice on "HOW TO PREPARE FOR A BEHAVIORAL INTERVIEW" from the [STAR_GUIDE] to teach the user the basics. 
     - This is where you fix everything.
     - Write a polished response using the Manager's keywords.
     - Use Markdown bolding for the headers: **Situation:**, **Task:**, **Action:**, **Result:**.
