@@ -385,6 +385,7 @@ coach_prompt = ChatPromptTemplate.from_template(
     - Example: "Your 'Action' section was too generic and didn't list specific steps. The 'Result' was missing quantifiable metrics."
     
     Field 2: "rewritten_answer"
+    - If the original answer was incomprehensible, Do not try to salvage it, INSTEAD, output the "HOW TO PREPARE FOR A BEHAVIORAL INTERVIEW" from the [STAR_GUIDE] to teach the user the basics. 
     - This is where you fix everything.
     - Write a polished response using the Manager's keywords.
     - Use Markdown bolding for the headers: **Situation:**, **Task:**, **Action:**, **Result:**.
