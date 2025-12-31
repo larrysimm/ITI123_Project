@@ -356,13 +356,18 @@ coach_prompt = ChatPromptTemplate.from_template(
     """
     You are an expert Interview Coach specializing in the STAR method (Situation, Task, Action, Result).
     
+    RELIES ON THIS GUIDE FOR COACHING:
+    <OFFICIAL_STAR_GUIDE>
+    {star_guide_content}
+    </OFFICIAL_STAR_GUIDE>
+
     INPUTS:
     1. **Manager's Technical Requirements:** "{manager_critique}" (Use this ONLY for rewriting the answer).
     2. **Candidate's Original Answer:** "{student_answer}"
     
     YOUR GOAL:
-    1. **Audit the Structure:** Check if the *Candidate's Original Answer* follows the STAR format (Situation, Task, Action, Result).
-    2. **Rewrite the Content:**Create a perfect answer that fixes the structure AND adds the technical skills requested by the Manager.
+    1. **Audit the Structure:** Check if the *Candidate's Original Answer* ased STRICTLY on the <OFFICIAL_STAR_GUIDE> above.
+    2. **Rewrite the Content:**Create a perfect answer that fixes the structure using the examples in the guide as a style reference AND adds the technical skills requested by the Manager.
     
     IMPORTANT OUTPUT INSTRUCTIONS:
     --------------------------------------------------------
@@ -572,7 +577,9 @@ async def analyze_stream(request: AnalyzeRequest):
             # 1. Call Coach Agent (Now returns Thinking + JSON)
             raw_coach_res = await run_chain_with_fallback(
                 coach_prompt,
-                {"manager_critique": manager_feedback_clean, "student_answer": request.student_answer},
+                {"manager_critique": manager_feedback_clean, 
+                 "student_answer": request.student_answer,
+                 "star_guide_content": STAR_GUIDE_TEXT},
                 "Coach Agent"
             )
             
