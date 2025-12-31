@@ -170,7 +170,7 @@ def get_detailed_skills(role_name):
             SELECT 
                 s.title, 
                 s.skill_code,
-                s.proficiency,
+                rs.proficiency,
                 GROUP_CONCAT(d.detail_item, '; ') as knowledge_list
             FROM role_skills rs 
             JOIN skill_definitions s ON rs.skill_code = s.skill_code 
