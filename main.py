@@ -471,7 +471,15 @@ def get_roles():
 async def upload_resume(file: UploadFile = File(...)):
     content = await file.read()
     reader = PdfReader(io.BytesIO(content))
-    text = "".join([p.extract_text() for p in reader.pages])
+    text = ""
+    for page in reader.pages:
+        text += page.extract_text() or ""
+
+    if len(text.strip()) < 50:
+        logger.warning("Uploaded PDF has very little text. Likely a scanned image.")
+        # You might want to return an error here or append a warning
+        text += "\n[SYSTEM NOTE: This file appears to be an image scan. Text extraction may be incomplete.]"
+        
     return {"filename": file.filename, "extracted_text": text[:4000]}
 
 @app.post("/analyze_stream")
