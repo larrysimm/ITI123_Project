@@ -81,6 +81,7 @@ async def run_chain_with_fallback(prompt_template, inputs, step_name="AI"):
             raise Exception(f"Both AI Engines Failed: {str(groq_e)}")
         
 def extract_clean_json(text):
+    logger.debug("Raw AI text received for parsing.")
     """
     Strips '```json' formatting and finds the actual JSON object { ... }
     """
@@ -93,14 +94,18 @@ def extract_clean_json(text):
         end_idx = text.rfind("}")
         
         if start_idx == -1 or end_idx == -1:
+            logger.error("Could not find any JSON-like structure in AI response.")
             return None
             
         json_str = text[start_idx : end_idx + 1]
         
         # 3. Parse and return
+        logger.info("JSON parsed successfully.")
         return json.loads(json_str)
         
     except json.JSONDecodeError:
+        logger.error(f"JSON Parsing Failed: {e}", exc_info=True)
+        logger.error(f"Bad JSON String: {json_str[:500]}...")
         return None
 
 # 3. DATABASE CONTEXT RETRIEVER
@@ -435,7 +440,7 @@ def get_questions():
         conn.close()
         return questions
     except Exception as e:
-        print(f"Error fetching questions: {e}")
+        logger.error(f"Error fetching questions: {e}", exc_info=True)
         return []
 
 @app.get("/roles")
@@ -457,7 +462,9 @@ def get_roles():
         conn.close()
         return roles
     except Exception as e:
-        print(f"Error fetching roles: {e}")
+        logger.error(f"Error fetching questions: {e}", exc_info=True)
+        logger.error(f"Error fetching roles: {e}", exc_info=True)
+
         return [] # Return empty list on failure
 
 @app.post("/upload_resume")
@@ -551,7 +558,7 @@ async def analyze_stream(request: AnalyzeRequest):
                     raise ValueError("No JSON brackets found in response.")
 
             except Exception as e:
-                print(f"JSON PARSE ERROR: {e}")
+                logger.error(f"Error parsing Coach JSON: {e}", exc_info=True)
                 coach_critique = "Could not parse AI structure feedback."
                 # Fallback: Strip the markdown tags manually so it's readable
                 rewritten_answer = re.sub(r"```json\s*|\s*```", "", coach_potential_json).strip()
@@ -699,7 +706,7 @@ async def match_skills(request: Request):
             yield json.dumps({"type": "result", "data": analysis_result}) + "\n"
 
         except Exception as e:
-            print(f"Stream Error: {e}")
+            logger.error(f"Stream Error in match_skills: {e}", exc_info=True)
             yield json.dumps({"type": "error", "message": str(e)}) + "\n"
 
     # Return the stream
