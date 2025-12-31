@@ -21,11 +21,12 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_FILE = os.path.join(BASE_DIR, "skills.db")
 JSON_PATH = os.path.join(BASE_DIR, "questions.json")
 EXCEL_FILE = os.path.join(BASE_DIR, "jobsandskills-skillsfuture-skills-framework-dataset.xlsx")
+STAR_FILE = os.path.join(BASE_DIR, "star_guide.pdf")
 
 # Github URLs (Keep your existing URLs)
 GITHUB_EXCEL_URL = "https://raw.githubusercontent.com/larrysimm/skills-data-static/main/jobsandskills-skillsfuture-skills-framework-dataset.xlsx"
-STAR_FILE = os.path.join(BASE_DIR, "star_guide.pdf")
 GITHUB_STAR_URL = "https://raw.githubusercontent.com/larrysimm/skills-data-static/main/star_guide.pdf"
+QUESTION_JSON_URL = "https://raw.githubusercontent.com/larrysimm/skills-data-static/main/questions.json"
 
 def download_file(url, filepath, description):
     if os.path.exists(filepath):
@@ -45,6 +46,7 @@ def init_db():
     logger.info("🚀 Starting Database Initialization...")
     download_file(GITHUB_EXCEL_URL, EXCEL_FILE, "Excel Dataset")
     download_file(GITHUB_STAR_URL, STAR_FILE, "Star Guide")
+    download_file(QUESTION_JSON_URL, JSON_PATH, "Questions JSON")
 
     conn = sqlite3.connect(DB_FILE)
     
