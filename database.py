@@ -125,6 +125,31 @@ def init_db():
             category TEXT DEFAULT 'General'
         )
     """)
+
+    try:
+        if os.path.exists(JSON_PATH):
+            with open(JSON_PATH, "r", encoding="utf-8") as f:
+                questions_data = json.load(f)
+                
+            logger.info(f"📂 Loading {len(questions_data)} questions from JSON...")
+            
+            # Insert questions (ignoring duplicates)
+            for q in questions_data:
+                # Handle cases where JSON is a list of strings OR list of objects
+                q_text = q if isinstance(q, str) else q.get("question", "")
+                
+                if q_text:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO saved_questions (question_text) VALUES (?)", 
+                        (q_text,)
+                    )
+            logger.info("✅ Questions successfully seeded into DB.")
+        else:
+            logger.warning(f"⚠️ questions.json not found at {JSON_PATH}")
+            
+    except Exception as e:
+        logger.error(f"❌ Error loading questions from JSON: {e}")
+        
     conn.commit()
     conn.close()
     logger.info(f"✅ SUCCESS! Database ready.")
