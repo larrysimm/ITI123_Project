@@ -11,7 +11,7 @@ import logging
 from ast import Dict
 from typing import Optional, Dict, List
 from dotenv import load_dotenv
-from fastapi import FastAPI, UploadFile, File, Request
+from fastapi import FastAPI, UploadFile, File, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -510,20 +510,80 @@ def get_roles():
 
         return [] # Return empty list on failure
 
+import io
+import logging
+from fastapi import FastAPI, File, UploadFile, HTTPException
+from pypdf import PdfReader
+
+# Setup Logger
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = FastAPI()
+
 @app.post("/upload_resume")
 async def upload_resume(file: UploadFile = File(...)):
+    """
+    Securely uploads and validates a PDF resume.
+    """
+    logger.info(f"📂 Received file upload: {file.filename}")
+
+    # --- SECURITY CHECK 1: Validate MIME Type (Quick Filter) ---
+    if file.content_type != "application/pdf":
+        raise HTTPException(status_code=400, detail="Invalid file type. Only PDF allowed.")
+
+    # --- SECURITY CHECK 2: File Size & Magic Bytes ---
+    MAX_SIZE = 5 * 1024 * 1024  # 5MB
+
+    # We read the file content into memory. 
+    # NOTE: For 5MB this is fine. For large files (e.g., videos), use chunked reading.
     content = await file.read()
-    reader = PdfReader(io.BytesIO(content))
-    text = ""
-    for page in reader.pages:
-        text += page.extract_text() or ""
 
-    if len(text.strip()) < 50:
-        logger.warning("Uploaded PDF has very little text. Likely a scanned image.")
-        # You might want to return an error here or append a warning
-        text += "\n[SYSTEM NOTE: This file appears to be an image scan. Text extraction may be incomplete.]"
+    # 2.1: Check Real Size
+    if len(content) > MAX_SIZE:
+        raise HTTPException(status_code=413, detail="File too large. Max size is 5MB.")
 
-    return {"filename": file.filename, "extracted_text": text[:4000]}
+    # 2.2: Check Magic Bytes (Signature)
+    # PDF files start with %PDF (bytes: 25 50 44 46)
+    if not content.startswith(b"%PDF"):
+        logger.warning(f"⚠️ Security Block: Magic Bytes mismatch for {file.filename}")
+        raise HTTPException(status_code=400, detail="Invalid file format. Not a valid PDF.")
+
+    # --- PROCESSING: Text Extraction ---
+    try:
+        # Wrap the bytes in a stream for pypdf
+        pdf_stream = io.BytesIO(content)
+        
+        # Validate parsing works (Defenses against malformed/exploit PDFs)
+        pdf_reader = PdfReader(pdf_stream)
+        
+        text = ""
+        for page in pdf_reader.pages:
+            extracted = page.extract_text()
+            if extracted:
+                text += extracted
+
+        # --- LOGIC CHECK: Is it a scanned image? ---
+        if len(text.strip()) < 50:
+            logger.warning(f"⚠️ OCR Required: File {file.filename} contains almost no text.")
+            return {
+                "filename": file.filename, 
+                "status": "partial_success",
+                "warning": "File appears to be a scanned image. OCR may be required.",
+                "extracted_text": ""
+            }
+
+        logger.info(f"✅ Text extraction successful. Length: {len(text)} chars")
+        return {
+            "filename": file.filename, 
+            "status": "success",
+            "extracted_text": text[:4000] # Truncate for response
+        }
+
+    except Exception as e:
+        logger.error(f"❌ PDF Parsing Failed: {e}")
+        # Return 400, not 500, because the error is likely the user's bad file, not your server logic
+        raise HTTPException(status_code=400, detail="File is corrupted or encrypted.")
 
 @app.post("/analyze_stream")
 async def analyze_stream(request: AnalyzeRequest):
