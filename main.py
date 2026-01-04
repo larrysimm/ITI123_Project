@@ -11,7 +11,7 @@ import logging
 from ast import Dict
 from typing import Optional, Dict, List
 from dotenv import load_dotenv
-from fastapi import FastAPI, UploadFile, File, Request, HTTPException
+from fastapi import FastAPI, UploadFile, File, Request, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -23,6 +23,7 @@ from google.api_core.exceptions import ResourceExhausted
 from pypdf import PdfReader
 
 STAR_GUIDE_TEXT = "Standard STAR Method principles." # Default fallback
+API_SECRET = os.getenv("BACKEND_SECRET", "default-insecure-secret")
 
 # --- LOGGER SETUP ---
 logging.basicConfig(
@@ -62,6 +63,26 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info(">>> SERVER SHUTTING DOWN <<<")
+
+@app.middleware("http")
+async def verify_secret_header(request: Request, call_next):
+    # Allow OPTIONS requests (needed for CORS pre-flight checks)
+    if request.method == "OPTIONS":
+        return await call_next(request)
+        
+    # Public endpoints (like docs or root) can be excluded if you want
+    if request.url.path in ["/", "/docs", "/openapi.json"]:
+         return await call_next(request)
+
+    # Check for the secret header
+    client_secret = request.headers.get("X-Poly-Secret")
+    
+    if client_secret != API_SECRET:
+        # Reject the request
+        return json.dumps({"detail": "Unauthorized: Invalid Secret"}), 401
+        
+    response = await call_next(request)
+    return response
 
 # 2. DUAL AI SETUP
 gemini_llm = ChatGoogleGenerativeAI(
