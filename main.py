@@ -510,17 +510,6 @@ def get_roles():
 
         return [] # Return empty list on failure
 
-import io
-import logging
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from pypdf import PdfReader
-
-# Setup Logger
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-app = FastAPI()
-
 @app.post("/upload_resume")
 async def upload_resume(file: UploadFile = File(...)):
     """
