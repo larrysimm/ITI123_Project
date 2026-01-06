@@ -18,6 +18,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # This includes main.py, database.py, skills.db, and star_guide.pdf
 COPY . .
 
+# 5a. Expose Port (Required for back4app)
+EXPOSE 8000
+
 # 6. Run the Application
 # Render provides the PORT variable automatically.
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
