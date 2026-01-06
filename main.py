@@ -388,7 +388,7 @@ coach_prompt = ChatPromptTemplate.from_template(
     
     YOUR GOAL:
     1. **Audit the Structure:** Check if the *Candidate's Original Answer* based STRICTLY on the <OFFICIAL_STAR_GUIDE> above.
-    2. **Rewrite the Content:**Create a perfect answer that fixes the structure using the examples in the guide as a style reference AND adds the technical skills requested by the Manager.
+    2. **Rewrite the Content:**Create a perfect answer that fixes the structure using the examples in the <OFFICIAL_STAR_GUIDE> as a style reference AND adds the technical skills requested by the Manager.
     
     IMPORTANT OUTPUT INSTRUCTIONS:
     --------------------------------------------------------
@@ -422,6 +422,8 @@ coach_prompt = ChatPromptTemplate.from_template(
         "rewritten_answer": "**Situation:** ... **Task:** ... **Action:** ... **Result:** ..."
     }}
     ```
+    IMPORTANT RULES:
+    1. Do NOT copy the example text above. Generate NEW content based on the user's input.
     """
 )
 

@@ -1,5 +1,5 @@
 # 1. Base Image: Use a lightweight Python version
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 # 2. Environment Variables to prevent Python from writing pyc files to disc
 ENV PYTHONDONTWRITEBYTECODE=1
