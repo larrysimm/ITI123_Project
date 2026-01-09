@@ -58,13 +58,13 @@ app.add_middleware(
 async def startup_event():
     logger.info(">>> SERVER STARTING UP <<<")
 
-    google_key = os.getenv("GOOGLE_API_KEY")
-    groq_key = os.getenv("GROQ_API_KEY")
-    openai_key = os.getenv("OPENAI_API_KEY")
+    # google_key = os.getenv("GOOGLE_API_KEY")
+    # groq_key = os.getenv("GROQ_API_KEY")
+    # openai_key = os.getenv("OPENAI_API_KEY")
     
-    logger.info(f"Google API: {mask_key(google_key)}")
-    logger.info(f"OpenAI API: {mask_key(openai_key)}")
-    logger.info(f"Groq API:   {mask_key(groq_key)}")
+    # logger.info(f"Google API: {mask_key(google_key)}")
+    # logger.info(f"OpenAI API: {mask_key(openai_key)}")
+    # logger.info(f"Groq API:   {mask_key(groq_key)}")
     
     # Load the PDF Guide into memory
     load_star_guide()
@@ -95,33 +95,64 @@ async def verify_secret_header(request: Request, call_next):
     response = await call_next(request)
     return response
 
-# 2. TRI-BRID AI SETUP
-# Option A: Gemini
-gemini_llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
-    temperature=0.2,
-    google_api_key=os.getenv("GOOGLE_API_KEY")
-)
-
-# Option B: OpenAI
-openai_llm = ChatOpenAI(
-    model="gpt-4o-mini", 
-    temperature=0.2,
-    api_key=os.getenv("OPENAI_API_KEY")
-)
-
-# Option C: Groq (Safety Net)
-groq_llm = ChatGroq(
-    model_name="llama-3.3-70b-versatile",
-    temperature=0.2,
-    groq_api_key=os.getenv("GROQ_API_KEY")
-)
-
 # Helper to safely mask keys
 def mask_key(key: str) -> str:
     if not key or len(key) < 5:
         return "❌ NOT SET"
     return f"✅ ...{key[-4:]}"  # Shows only last 4 chars
+
+# 2. TRI-BRID AI SETUP
+# Option A: Gemini
+google_key = os.getenv("GOOGLE_API_KEY")
+gemini_llm = None  # Default to None
+
+if google_key:
+    try:
+        gemini_llm = ChatGoogleGenerativeAI(
+            model="gemini-2.5-flash",
+            temperature=0.2,
+            google_api_key=google_key
+        )
+        logger.info(f"✅ Gemini Initialized successfully. Google API: {mask_key(google_key)}")
+    except Exception as e:
+        logger.error(f"❌ Gemini Init Failed: {e}")
+else:
+    logger.warning("⚠️ GOOGLE_API_KEY not found. Skipping Gemini.")
+
+# Option B: OpenAI
+openai_key = os.getenv("OPENAI_API_KEY")
+openai_llm = None  # Default to None
+
+if openai_key:
+    try:
+        openai_llm = ChatOpenAI(
+            model="gpt-4o-mini",
+            temperature=0.2,
+            api_key=openai_key
+        )
+        logger.info(f"✅ OpenAI Initialized successfully. OpenAI API: {mask_key(openai_key)}")
+    except Exception as e:
+        logger.error(f"❌ OpenAI Init Failed: {e}")
+else:
+    logger.warning("⚠️ OPENAI_API_KEY not found. Skipping OpenAI.")
+
+# Option C: Groq (Safety Net)
+groq_key = os.getenv("GROQ_API_KEY")
+groq_llm = None  # Default to None
+
+if groq_key:
+    try:
+        groq_llm = ChatGroq(
+            model_name="llama-3.3-70b-versatile",
+            temperature=0.2,
+            groq_api_key=groq_key
+        )
+        logger.info(f"✅ Groq Initialized successfully. Groq API: {mask_key(groq_key)}")
+    except Exception as e:
+        logger.error(f"❌ Groq Init Failed: {e}")
+else:
+    logger.warning("⚠️ GROQ_API_KEY not found. Skipping Groq.")
+
 
 async def run_chain_with_fallback(prompt_template, inputs, step_name="AI"):
     """
