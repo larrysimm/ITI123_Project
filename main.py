@@ -100,11 +100,14 @@ groq_llm = ChatGroq(
 # Helper: Failover Logic
 async def run_chain_with_fallback(prompt_template, inputs, step_name="AI"):
     try:
+        logger.info(f"🤖 [Model Selection] Using GEMINI 2.5 Flash for {step_name}...")
         chain = prompt_template | gemini_llm | StrOutputParser()
         return await chain.ainvoke(inputs)
     except ResourceExhausted:
         # CHANGED: print -> logger.warning
         logger.warning(f"⚠️ GEMINI QUOTA HIT ({step_name}). Switching to GROQ...")
+        
+        logger.info(f"🤖 [Model Selection] Using GROQ (Llama 3.3) for {step_name}...")
         chain = prompt_template | groq_llm | StrOutputParser()
         return await chain.ainvoke(inputs)
     except Exception as e:
