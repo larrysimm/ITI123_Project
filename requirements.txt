@@ -5,6 +5,7 @@ langchain
 langchain-core
 langchain-google-genai
 langchain_groq
+langchain-openai
 langchain-community
 pypdf
 python-multipart

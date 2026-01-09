@@ -2,11 +2,12 @@ import os
 import sqlite3
 import json
 import asyncio
-import re  # <--- NEW: For cleaning JSON output
+import re  
 import json
 import io
 import database
 import logging
+import random  
 
 from ast import Dict
 from typing import Optional, Dict, List
@@ -19,6 +20,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+from langchain_openai import ChatOpenAI
 from google.api_core.exceptions import ResourceExhausted
 from pypdf import PdfReader
 
@@ -58,13 +60,15 @@ async def startup_event():
 
     google_key = os.getenv("GOOGLE_API_KEY")
     groq_key = os.getenv("GROQ_API_KEY")
+    openai_key = os.getenv("OPENAI_API_KEY")
     
     logger.info(f"Google API: {mask_key(google_key)}")
+    logger.info(f"OpenAI API: {mask_key(openai_key)}")
     logger.info(f"Groq API:   {mask_key(groq_key)}")
     
     # Load the PDF Guide into memory
     load_star_guide()
-    
+
     logger.info("Server is ready to accept requests.")
 
 @app.on_event("shutdown")
@@ -91,13 +95,22 @@ async def verify_secret_header(request: Request, call_next):
     response = await call_next(request)
     return response
 
-# 2. DUAL AI SETUP
+# 2. TRI-BRID AI SETUP
+# Option A: Gemini
 gemini_llm = ChatGoogleGenerativeAI(
     model="gemini-2.5-flash",
     temperature=0.2,
     google_api_key=os.getenv("GOOGLE_API_KEY")
 )
 
+# Option B: OpenAI
+openai_llm = ChatOpenAI(
+    model="gpt-4o-mini", 
+    temperature=0.2,
+    api_key=os.getenv("OPENAI_API_KEY")
+)
+
+# Option C: Groq (Safety Net)
 groq_llm = ChatGroq(
     model_name="llama-3.3-70b-versatile",
     temperature=0.2,
@@ -110,55 +123,70 @@ def mask_key(key: str) -> str:
         return "❌ NOT SET"
     return f"✅ ...{key[-4:]}"  # Shows only last 4 chars
 
-# Helper: Failover Logic
 async def run_chain_with_fallback(prompt_template, inputs, step_name="AI"):
     """
-    Runs the AI chain, logs token usage, and handles fallback logic.
+    Strategy:
+    1. Tier 1: OpenAI & Gemini (Randomize order 50/50).
+    2. Tier 2: Groq (Only if BOTH Tier 1 models fail).
     """
-    
-    # 1. DEFINE THE CHAINS (Remove StrOutputParser to keep metadata)
-    gemini_chain = prompt_template | gemini_llm 
-    groq_chain = prompt_template | groq_llm 
 
+    # Helper to run and log tokens
     async def execute_and_log(chain, model_name):
-        # Run the chain
         response = await chain.ainvoke(inputs)
         
-        # EXTRACT TOKEN USAGE
-        # LangChain standardizes usage in response.usage_metadata
+        # Capture Usage Stats
         usage = response.usage_metadata
         if usage:
             input_tok = usage.get('input_tokens', 0)
             output_tok = usage.get('output_tokens', 0)
             total_tok = usage.get('total_tokens', 0)
-            
             logger.info(
                 f"💰 TOKEN USAGE ({step_name} - {model_name}): "
                 f"In={input_tok}, Out={output_tok}, Total={total_tok}"
             )
-        else:
-            logger.info(f"💰 TOKEN USAGE ({step_name}): Metadata not available.")
-
-        # Return just the content (String) to keep your other code working
         return response.content
 
-    # 2. TRY GEMINI FIRST
-    try:
-        logger.info(f"🤖 [Model Selection] Using GEMINI 2.5 Flash for {step_name}...")
-        return await execute_and_log(gemini_chain, "Gemini")
+    # 1. DEFINE CHAINS
+    chains = {
+        "OpenAI": prompt_template | openai_llm,
+        "Gemini": prompt_template | gemini_llm,
+        "Groq":   prompt_template | groq_llm
+    }
 
-    except ResourceExhausted:
-        logger.warning(f"⚠️ GEMINI QUOTA HIT ({step_name}). Switching to GROQ...")
-        return await execute_and_log(groq_chain, "Groq")
-        
-    except Exception as e:
-        logger.error(f"⚠️ GEMINI ERROR ({step_name}): {e}. Switching to GROQ...", exc_info=True)
+    # 2. BUILD THE EXECUTION PLAN
+    # Create a list of Tier 1 models
+    tier1 = ["OpenAI", "Gemini"]
+    
+    # Shuffle them! (Randomly decides who goes first)
+    random.shuffle(tier1) 
+    
+    # Add Groq as the final safety net
+    execution_order = tier1 + ["Groq"]
+    
+    logger.info(f"🎲 Execution Plan for {step_name}: {execution_order}")
+
+    # 3. EXECUTE WITH FAILOVER
+    last_exception = None
+    
+    for model_name in execution_order:
         try:
-            return await execute_and_log(groq_chain, "Groq")
-        except Exception as groq_e:
-            logger.critical(f"Both AI Engines Failed: {str(groq_e)}", exc_info=True)
-            raise Exception(f"Both AI Engines Failed: {str(groq_e)}")
-        
+            logger.info(f"🤖 Attempting {step_name} with {model_name}...")
+            
+            # Run the specific chain
+            result = await execute_and_log(chains[model_name], model_name)
+            
+            # If successful, return immediately
+            return result
+            
+        except Exception as e:
+            last_exception = e
+            logger.warning(f"⚠️ {model_name} Failed: {e}. Failing over...")
+            # Loop continues to the next model in the list...
+
+    # 4. IF EVERYTHING FAILS
+    logger.critical(f"❌ ALL AI MODELS FAILED for {step_name}.")
+    raise last_exception
+
 def extract_clean_json(text):
     logger.debug("Raw AI text received for parsing.")
     """
