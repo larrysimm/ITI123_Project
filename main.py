@@ -50,10 +50,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # 👇 INSERT THIS BLOCK HERE 👇
 @app.on_event("startup")
 async def startup_event():
     logger.info(">>> SERVER STARTING UP <<<")
+
+    google_key = os.getenv("GOOGLE_API_KEY")
+    groq_key = os.getenv("GROQ_API_KEY")
+    
+    logger.info(f"Google API: {mask_key(google_key)}")
+    logger.info(f"Groq API:   {mask_key(groq_key)}")
     
     # Load the PDF Guide into memory
     load_star_guide()
@@ -97,25 +104,57 @@ groq_llm = ChatGroq(
     groq_api_key=os.getenv("GROQ_API_KEY")
 )
 
+# Helper to safely mask keys
+def mask_key(key: str) -> str:
+    if not key or len(key) < 5:
+        return "❌ NOT SET"
+    return f"✅ ...{key[-4:]}"  # Shows only last 4 chars
+
 # Helper: Failover Logic
 async def run_chain_with_fallback(prompt_template, inputs, step_name="AI"):
+    """
+    Runs the AI chain, logs token usage, and handles fallback logic.
+    """
+    
+    # 1. DEFINE THE CHAINS (Remove StrOutputParser to keep metadata)
+    gemini_chain = prompt_template | gemini_llm 
+    groq_chain = prompt_template | groq_llm 
+
+    async def execute_and_log(chain, model_name):
+        # Run the chain
+        response = await chain.ainvoke(inputs)
+        
+        # EXTRACT TOKEN USAGE
+        # LangChain standardizes usage in response.usage_metadata
+        usage = response.usage_metadata
+        if usage:
+            input_tok = usage.get('input_tokens', 0)
+            output_tok = usage.get('output_tokens', 0)
+            total_tok = usage.get('total_tokens', 0)
+            
+            logger.info(
+                f"💰 TOKEN USAGE ({step_name} - {model_name}): "
+                f"In={input_tok}, Out={output_tok}, Total={total_tok}"
+            )
+        else:
+            logger.info(f"💰 TOKEN USAGE ({step_name}): Metadata not available.")
+
+        # Return just the content (String) to keep your other code working
+        return response.content
+
+    # 2. TRY GEMINI FIRST
     try:
         logger.info(f"🤖 [Model Selection] Using GEMINI 2.5 Flash for {step_name}...")
-        chain = prompt_template | gemini_llm | StrOutputParser()
-        return await chain.ainvoke(inputs)
+        return await execute_and_log(gemini_chain, "Gemini")
+
     except ResourceExhausted:
-        # CHANGED: print -> logger.warning
         logger.warning(f"⚠️ GEMINI QUOTA HIT ({step_name}). Switching to GROQ...")
+        return await execute_and_log(groq_chain, "Groq")
         
-        logger.info(f"🤖 [Model Selection] Using GROQ (Llama 3.3) for {step_name}...")
-        chain = prompt_template | groq_llm | StrOutputParser()
-        return await chain.ainvoke(inputs)
     except Exception as e:
-        # CHANGED: print -> logger.error with traceback
         logger.error(f"⚠️ GEMINI ERROR ({step_name}): {e}. Switching to GROQ...", exc_info=True)
         try:
-            chain = prompt_template | groq_llm | StrOutputParser()
-            return await chain.ainvoke(inputs)
+            return await execute_and_log(groq_chain, "Groq")
         except Exception as groq_e:
             logger.critical(f"Both AI Engines Failed: {str(groq_e)}", exc_info=True)
             raise Exception(f"Both AI Engines Failed: {str(groq_e)}")
