@@ -296,7 +296,7 @@ def extract_clean_json(text):
         logger.info("JSON parsed successfully.")
         return json.loads(json_str)
         
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
         logger.error(f"JSON Parsing Failed: {e}", exc_info=True)
         logger.error(f"Bad JSON String: {json_str[:500]}...")
         return None
@@ -306,20 +306,27 @@ def parse_llm_response(raw_text):
     Extracts content inside <thinking> tags and separates it from the final answer.
     Returns: (thinking_trace, final_answer)
     """
-    # Regex to find content between <thinking> and </thinking>
-    # re.DOTALL allows the dot (.) to match newlines
+    if not raw_text:
+        return "No thinking.", "No response."
+
+    # 1. Try to find the thinking block
     thinking_match = re.search(r'<thinking>(.*?)</thinking>', raw_text, re.DOTALL)
     
     if thinking_match:
+        # Case A: Tags found
         thinking_content = thinking_match.group(1).strip()
-        # Remove the thinking block from the original text to get the final answer
         final_answer = re.sub(r'<thinking>.*?</thinking>', '', raw_text, flags=re.DOTALL).strip()
-    else:
-        # Fallback if AI forgets tags
-        thinking_content = "No thinking trace provided by AI."
-        final_answer = raw_text.strip()
         
-    return thinking_content, final_answer
+        # Safety: If final answer is empty but thinking exists, use thinking as the answer
+        if not final_answer:
+            return "Thinking used as answer.", thinking_content
+            
+        return thinking_content, final_answer
+    
+    else:
+        # Case B: NO Tags found (The Critical Fix)
+        # If the AI didn't output tags, treat the WHOLE text as the final answer.
+        return "No internal thought trace.", raw_text.strip()
 
 def get_static_fallback(step_name: str, inputs: dict) -> str:
     """
@@ -467,7 +474,7 @@ def extract_clean_json(text):
         logger.info("JSON parsed successfully.")
         return json.loads(json_str)
         
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
         logger.error(f"JSON Parsing Failed: {e}", exc_info=True)
         logger.error(f"Bad JSON String: {json_str[:500]}...")
         return None

@@ -241,12 +241,18 @@ async def analyze_stream(request: AnalyzeRequest):
                     json_str = coach_potential_json[start_index:end_index]
                     
                     # B. CRITICAL FIX: strict=False allows newlines inside the JSON strings
-                    coach_data = json.loads(json_str, strict=False)
+                    coach_data = ai_service.extract_clean_json(json_str, strict=False)
                     
-                    coach_critique = coach_data.get("coach_critique", "Analysis provided.")
-                    rewritten_answer = coach_data.get("rewritten_answer", "Answer generated.")
-                else:
-                    raise ValueError("No JSON brackets found in response.")
+                coach_data = {
+                    "coach_critique": "Could not parse AI response.",
+                    "rewritten_answer": json_str # Fallback to raw text
+                }
+                # Final Result
+                yield json.dumps({"type": "result", "data": {
+                    "manager_critique": manager_feedback_clean,
+                    "coach_critique": coach_data.get("coach_critique"),
+                    "rewritten_answer": coach_data.get("rewritten_answer")
+                }}) + "\n"
 
             except Exception as e:
                 logger.error(f"Error parsing Coach JSON: {e}", exc_info=True)
