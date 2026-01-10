@@ -23,6 +23,8 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_openai import ChatOpenAI
 from google.api_core.exceptions import ResourceExhausted
 from pypdf import PdfReader
+from .db import initialize 
+from .db import database
 
 STAR_GUIDE_TEXT = "Standard STAR Method principles." # Default fallback
 API_SECRET = os.getenv("BACKEND_SECRET", "default-insecure-secret")
@@ -57,16 +59,8 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     logger.info(">>> SERVER STARTING UP <<<")
+    initialize.init_db()
 
-    # google_key = os.getenv("GOOGLE_API_KEY")
-    # groq_key = os.getenv("GROQ_API_KEY")
-    # openai_key = os.getenv("OPENAI_API_KEY")
-    
-    # logger.info(f"Google API: {mask_key(google_key)}")
-    # logger.info(f"OpenAI API: {mask_key(openai_key)}")
-    # logger.info(f"Groq API:   {mask_key(groq_key)}")
-    
-    # Load the PDF Guide into memory
     load_star_guide()
 
     logger.info("Server is ready to accept requests.")
