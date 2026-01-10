@@ -450,31 +450,3 @@ async def run_chain_with_fallback(prompt_template, inputs, step_name="AI"):
     # =========================================================
     logger.critical(f"❌ ALL AI MODELS FAILED for {step_name}. Deploying Static Response.")
     return get_static_fallback(step_name, inputs)
-
-def extract_clean_json(text):
-    logger.debug("Raw AI text received for parsing.")
-    """
-    Strips '```json' formatting and finds the actual JSON object { ... }
-    """
-    try:
-        # 1. Remove Markdown code blocks
-        text = re.sub(r"```json|```", "", text, flags=re.IGNORECASE).strip()
-        
-        # 2. Find the content between the first '{' and the last '}'
-        start_idx = text.find("{")
-        end_idx = text.rfind("}")
-        
-        if start_idx == -1 or end_idx == -1:
-            logger.error("Could not find any JSON-like structure in AI response.")
-            return None
-            
-        json_str = text[start_idx : end_idx + 1]
-        
-        # 3. Parse and return
-        logger.info("JSON parsed successfully.")
-        return json.loads(json_str)
-        
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON Parsing Failed: {e}", exc_info=True)
-        logger.error(f"Bad JSON String: {json_str[:500]}...")
-        return None

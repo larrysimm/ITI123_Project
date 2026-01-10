@@ -167,117 +167,66 @@ async def upload_resume(file: UploadFile = File(...)):
 async def analyze_stream(request: AnalyzeRequest):
     async def event_generator():
         try:
-            # --- STEP 1: CONTEXT & SKILLS ---
-            yield json.dumps({"type": "step", "step_id": 1, "message": "Extracting Data..."}) + "\n"
-
-            # Format Skill Gaps for the LLM
-            # We convert the JSON list into a readable string string
-            skill_gaps_str = "No specific gaps identified."
-            if request.skill_data and "missing" in request.skill_data:
-                missing = request.skill_data["missing"]
-                if missing:
-                    skill_gaps_str = "\n".join(
-                        [f"- {m['skill']} ({m.get('code', 'N/A')}): {m.get('gap', '')}" for m in missing]
-                    )
-
-            yield json.dumps({"type": "step", "step_id": 1, "message": "Reading Context..."}) + "\n"
-
+            # 1. Context
+            yield json.dumps({"type": "step", "step_id": 1, "message": "Gathering Context..."}) + "\n"
             loop = asyncio.get_event_loop()
             detailed_skills_str = await loop.run_in_executor(None, database.get_detailed_skills, request.target_role)
-            
-            # --- STEP 2: MANAGER ANALYSIS ---
+
+            # 2. Manager
             yield json.dumps({"type": "step", "step_id": 2, "message": "Manager Analysis..."}) + "\n"
             
-            raw_manager_res = await ai_service.run_chain_with_fallback(
+            manager_res = await ai_service.run_chain_with_fallback(
                 ai_service.manager_prompt,
                 {
                     "role": request.target_role,
                     "detailed_skills": detailed_skills_str,
                     "resume_text": request.resume_text[:2000],
-                    "skill_gaps": skill_gaps_str,
                     "question": request.question,
                     "student_answer": request.student_answer
-                }, 
+                },
                 "Manager Agent"
             )
+            
+            # ✅ ROBUST PARSING
+            man_thinking, man_feedback = ai_service.parse_llm_response(manager_res)
+            
+            # Send partial update (Thinking)
+            yield json.dumps({"type": "partial_update", "data": {"manager_thinking": man_thinking}}) + "\n"
 
-            # 🔹 NEW: Parse the Thinking Trace vs. Final Feedback
-            manager_thinking, manager_feedback_clean = ai_service.parse_llm_response(raw_manager_res)
-
-            # 🚀 NEW: Send the Thinking Trace IMMEDIATELY to the frontend
-            yield json.dumps({
-                "type": "partial_update", 
-                "data": { "manager_thinking": manager_thinking }
-            }) + "\n"
-
-            # --- STEP 3: COACH REFINEMENT ---
+            # 3. Coach
             yield json.dumps({"type": "step", "step_id": 3, "message": "Coach Refinement..."}) + "\n"
             
-            # 1. Call Coach Agent (Now returns Thinking + JSON)
-            raw_coach_res = await ai_service.run_chain_with_fallback(
-                ai_service.oach_prompt,
-                {"manager_critique": manager_feedback_clean, 
-                 "student_answer": request.student_answer,
-                 "star_guide_content": ai_service.STAR_GUIDE_TEXT},
+            coach_res = await ai_service.run_chain_with_fallback(
+                ai_service.coach_prompt,
+                {
+                    "manager_critique": man_feedback, 
+                    "student_answer": request.student_answer,
+                    "star_guide_content": ai_service.STAR_GUIDE_TEXT
+                },
                 "Coach Agent"
             )
-            
-            # 2. ✂️ SPLIT DATA (Thinking vs. The Rest)
-            coach_thinking, coach_potential_json = ai_service.parse_llm_response(raw_coach_res)
 
-            # 3. 🚀 SEND THINKING TRACE IMMEDIATELY
-            yield json.dumps({
-                "type": "partial_update", 
-                "data": { "coach_thinking": coach_thinking }
-            }) + "\n"
-            
-            # 4. 🧹 ROBUST JSON CLEANUP (The Fix)
-            try:
-                # A. Find the braces manually to ignore markdown filler
-                start_index = coach_potential_json.find('{')
-                end_index = coach_potential_json.rfind('}') + 1
-                
-                if start_index != -1 and end_index != -1:
-                    json_str = coach_potential_json[start_index:end_index]
-                    
-                    # B. CRITICAL FIX: strict=False allows newlines inside the JSON strings
-                    coach_data = ai_service.extract_clean_json(json_str, strict=False)
-                    
+            coach_thinking, coach_json_str = ai_service.parse_llm_response(coach_res)
+            yield json.dumps({"type": "partial_update", "data": {"coach_thinking": coach_thinking}}) + "\n"
+
+            # ✅ ROBUST JSON (Prevents Crash)
+            # If parsing fails, we default to a safe dictionary, NOT None.
+            coach_data = ai_service.extract_clean_json(coach_json_str)
+            if not coach_data:
                 coach_data = {
                     "coach_critique": "Could not parse AI response.",
-                    "rewritten_answer": json_str # Fallback to raw text
+                    "rewritten_answer": coach_json_str # Show raw text as fallback
                 }
-                # Final Result
-                yield json.dumps({"type": "result", "data": {
-                    "manager_critique": manager_feedback_clean,
-                    "coach_critique": coach_data.get("coach_critique"),
-                    "rewritten_answer": coach_data.get("rewritten_answer")
-                }}) + "\n"
 
-            except Exception as e:
-                logger.error(f"Error parsing Coach JSON: {e}", exc_info=True)
-                coach_critique = "Could not parse AI structure feedback."
-                # Fallback: Strip the markdown tags manually so it's readable
-                rewritten_answer = re.sub(r"```json\s*|\s*```", "", coach_potential_json).strip()
-
-            # --- STEP 4: FINAL RESPONSE ---
-            yield json.dumps({"type": "step", "step_id": 4, "message": "Drafting Response..."}) + "\n"
-            
-            await asyncio.sleep(0.05) 
-
-            # 5. Add 'coach_thinking' to final payload
-            final_data = {
-                "manager_critique": manager_feedback_clean,
-                "manager_thinking": manager_thinking,
-                "coach_critique": coach_critique,
-                "coach_thinking": coach_thinking,    # <--- Add this
-                "rewritten_answer": rewritten_answer 
-            }
-            
-            # 4. Send Result
-            yield json.dumps({"type": "result", "data": final_data}) + "\n"
+            # 4. Final Result
+            yield json.dumps({"type": "result", "data": {
+                "manager_critique": man_feedback,
+                "coach_critique": coach_data.get("coach_critique", "No critique available."),
+                "rewritten_answer": coach_data.get("rewritten_answer", "No answer generated.")
+            }}) + "\n"
 
         except Exception as e:
+            logger.error(f"Stream Error: {e}", exc_info=True)
             yield json.dumps({"type": "error", "message": str(e)}) + "\n"
 
     return StreamingResponse(event_generator(), media_type="application/x-ndjson")
