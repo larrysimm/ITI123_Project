@@ -1,5 +1,4 @@
 import os
-import json
 import asyncio
 import re  
 import json
@@ -7,8 +6,6 @@ import io
 import logging
 import random  
 
-from app import database
-from ast import Dict
 from typing import Optional, Dict, List
 from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File, Request, HTTPException, Header
@@ -24,6 +21,7 @@ from google.api_core.exceptions import ResourceExhausted
 from pypdf import PdfReader
 from .db import initialize 
 from .db import database
+from .core.config import settings, logger
 
 STAR_GUIDE_TEXT = "Standard STAR Method principles." # Default fallback
 API_SECRET = os.getenv("BACKEND_SECRET", "default-insecure-secret")

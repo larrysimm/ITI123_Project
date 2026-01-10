@@ -2,6 +2,7 @@
 import sqlite3
 import logging
 import os
+from ..core.config import settings
 
 # --- LOGGER SETUP ---
 logger = logging.getLogger(__name__)
@@ -14,12 +15,12 @@ logger = logging.getLogger(__name__)
 # .parent -> PROJECT_ROOT/
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(CURRENT_DIR)))
-DB_FILE = os.path.join(BASE_DIR, "skills.db")
+DB_FILE = settings.DB_PATH
 
 # Fallback if the logic above fails in some envs, assume standard structure
 if not os.path.exists(DB_FILE):
     # Try one level up (if running from root)
-    DB_FILE = "skills.db"
+    DB_FILE = settings.DB_PATH
 
 def get_db_connection():
     conn = sqlite3.connect(DB_FILE)

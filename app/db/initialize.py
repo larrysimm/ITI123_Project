@@ -52,6 +52,24 @@ def init_db():
 
     conn = sqlite3.connect(DB_FILE)
     
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS role_descriptions (
+            role TEXT, description TEXT, expectations TEXT
+        );
+        CREATE TABLE IF NOT EXISTS skill_definitions (
+            skill_code TEXT PRIMARY KEY, title TEXT, definition TEXT
+        );
+        CREATE TABLE IF NOT EXISTS role_skills (
+            role TEXT, skill_code TEXT, proficiency TEXT, skill_title TEXT
+        );
+        CREATE TABLE IF NOT EXISTS skill_details (
+            skill_code TEXT, detail_item TEXT
+        );
+        CREATE TABLE IF NOT EXISTS saved_questions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, question_text TEXT UNIQUE
+        );
+    """)
+    
     try:
         if os.path.exists(EXCEL_FILE):
             logger.info("⚙️  Processing Excel Data...")
