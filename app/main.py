@@ -5,10 +5,10 @@ import asyncio
 import re  
 import json
 import io
-import database
 import logging
 import random  
 
+from app import database
 from ast import Dict
 from typing import Optional, Dict, List
 from dotenv import load_dotenv
