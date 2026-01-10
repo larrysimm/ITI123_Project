@@ -756,7 +756,7 @@ async def match_skills(request: Request):
             }) + "\n"
             
             # --- B. BUILD detailed_skills LIST (CRITICAL: DO THIS BEFORE COUNTING) ---
-            detailed_skills = database.get_match_skills_data
+            detailed_skills = database.get_match_skills_data(target_role)
 
             # --- C. NOW WE CAN SAFELY COUNT ---
             count = len(detailed_skills)
