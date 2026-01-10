@@ -44,8 +44,6 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 app = FastAPI(title="Poly-to-Pro", version="3.0.0")
 
-database.init_db()
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://larrysim-iti123-project.netlify.app"],
