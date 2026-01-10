@@ -32,7 +32,7 @@ def download_file(url, filepath, description):
     if os.path.exists(filepath):
         logger.info(f"📂 {description} found locally.")
         return
-    logger.info(f"⬇️ Downloading {description}...")
+    logger.info(f"⬇️ Downloading {description} from {url}...")
     try:
         response = requests.get(url)
         response.raise_for_status()
