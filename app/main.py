@@ -7,6 +7,7 @@ import logging
 import random  
 
 from typing import Optional, Dict, List
+from urllib import request
 from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File, Request, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
@@ -171,6 +172,16 @@ async def analyze_stream(request: AnalyzeRequest):
             yield json.dumps({"type": "step", "step_id": 1, "message": "Gathering Context..."}) + "\n"
             loop = asyncio.get_event_loop()
             detailed_skills_str = await loop.run_in_executor(None, database.get_detailed_skills, request.target_role)
+            
+            skill_gaps_str = "No specific gaps identified."
+            if request.skill_data and "missing" in request.skill_data:
+                missing = request.skill_data["missing"]
+                if missing:
+                    skill_gaps_str = "\n".join(
+                        [f"- {m['skill']} ({m.get('code', 'N/A')}): {m.get('gap', '')}" for m in missing]
+                    )
+
+            yield json.dumps({"type": "step", "step_id": 1, "message": "Reading Context..."}) + "\n"
 
             # 2. Manager
             yield json.dumps({"type": "step", "step_id": 2, "message": "Manager Analysis..."}) + "\n"
@@ -182,6 +193,7 @@ async def analyze_stream(request: AnalyzeRequest):
                     "detailed_skills": detailed_skills_str,
                     "resume_text": request.resume_text[:2000],
                     "question": request.question,
+                    "skill_gaps": skill_gaps_str,
                     "student_answer": request.student_answer
                 },
                 "Manager Agent"
