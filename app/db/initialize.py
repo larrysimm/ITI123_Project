@@ -34,7 +34,7 @@ def download_file(url, filepath, description):
     if os.path.exists(filepath):
         logger.info(f"📂 {description} found locally.")
         return
-    logger.info(f"⬇️ Downloading {description} from {url}...")
+    logger.info(f"⬇️ Downloading {description} from {url}")
     try:
         response = requests.get(url)
         response.raise_for_status()
@@ -95,7 +95,7 @@ def init_db():
                 # Select only the renamed columns to be safe
                 df = df[['role', 'skill_title', 'skill_code', 'proficiency']]
                 df.to_sql('role_skills', conn, if_exists='replace', index=False)
-                logger.info("   -> Role-Skill Map Loaded (Error Fixed)")
+                logger.info("   -> Role-Skill Map Loaded")
 
             # --- 4. Skill Definitions ---
             if "TSC_CCS_Key" in xls.sheet_names:

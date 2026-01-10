@@ -1,5 +1,4 @@
 import os
-import sqlite3
 import json
 import asyncio
 import re  
@@ -51,7 +50,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 # 👇 INSERT THIS BLOCK HERE 👇
 @app.on_event("startup")
@@ -295,91 +293,6 @@ def extract_clean_json(text):
         logger.error(f"JSON Parsing Failed: {e}", exc_info=True)
         logger.error(f"Bad JSON String: {json_str[:500]}...")
         return None
-
-# 3. DATABASE CONTEXT RETRIEVER
-def get_full_role_context(role: str) -> str:
-    conn = sqlite3.connect("skills.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT description, expectations FROM role_descriptions WHERE role = ?", (role,))
-    desc_row = cursor.fetchone()
-    
-    if not desc_row:
-        conn.close()
-        return "No specific role data found. Use general best practices."
-
-    cursor.execute("SELECT task FROM role_tasks WHERE role = ? LIMIT 5", (role,))
-    tasks = [r[0] for r in cursor.fetchall()]
-    
-    query = """
-        SELECT s.title, s.description FROM role_skills rs 
-        JOIN skill_definitions s ON rs.skill_code = s.skill_code 
-        WHERE rs.role = ? LIMIT 10
-    """
-    cursor.execute(query, (role,))
-    skills = cursor.fetchall()
-    conn.close()
-
-    context = f"ROLE: {role}\nDESC: {desc_row[0]}\nEXPECTATIONS: {desc_row[1]}\nKEY TASKS:\n"
-    for t in tasks: context += f"- {t}\n"
-    context += "\nCOMPETENCIES:\n"
-    for t, d in skills: context += f"- {t}: {d}\n"
-    return context
-
-def get_detailed_skills(role_name):
-    """
-    Fetches explicit metadata (Role, Skill Code, Proficiency, Knowledge) 
-    to force the AI to cite sources precisely.
-    """
-    try:
-        conn = sqlite3.connect("skills.db")
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        # Added s.skill_code to the selection
-        # ADDED: Log entry
-        logger.info(f"Fetching detailed skills spec for: {role_name}")
-        query = """
-            SELECT 
-                s.title, 
-                s.skill_code,
-                rs.proficiency,
-                GROUP_CONCAT(d.detail_item, '; ') as knowledge_list
-            FROM role_skills rs 
-            JOIN skill_definitions s ON rs.skill_code = s.skill_code 
-            LEFT JOIN skill_details d ON s.skill_code = d.skill_code
-            WHERE rs.role = ? 
-            GROUP BY s.skill_code
-            LIMIT 6
-        """
-        cursor.execute(query, (role_name,))
-        rows = cursor.fetchall()
-        conn.close()
-        
-        if not rows:
-            return f"Standard industry spec for {role_name} (No specific DB entry)."
-
-        # Format as a Strict Reference Document
-        skills_text = f"OFFICIAL SPECIFICATION FOR ROLE: {role_name.upper()}\n"
-        skills_text += "=" * 40 + "\n\n"
-        
-        for row in rows:
-            knowledge = (row["knowledge_list"][:200] + "...") if row["knowledge_list"] else "General application"
-            level = row["proficiency"] if row["proficiency"] else "Standard"
-            code = row["skill_code"]
-            
-            # Explicit Format
-            skills_text += f"Ref Code: [{row['skill_code']}]\n"
-            skills_text += f"Skill Title: {row['title']}\n"
-            skills_text += f"Required Level: {level}\n"
-            skills_text += f"Key Knowledge: {knowledge}\n"
-            skills_text += "-" * 20 + "\n"
-        
-        logger.info(f"Successfully retrieved {len(rows)} skills for {role_name}")
-        return skills_text
-
-    except Exception as e:
-        logger.error(f"Error fetching skills: {e}", exc_info=True)
-        return "Standard industry skills."
 
 def parse_llm_response(raw_text):
     """
@@ -638,51 +551,13 @@ async def root():
 
 @app.get("/questions")
 def get_questions():
-    """
-    Fetches the list of questions from the database.
-    These were populated from your questions.json file.
-    """
-    try:
-        # Connect to the DB
-        conn = sqlite3.connect("skills.db")
-        cursor = conn.cursor()
-        
-        # Select all questions
-        cursor.execute("SELECT id, question_text FROM saved_questions ORDER BY id ASC")
-        rows = cursor.fetchall()
-        
-        # Convert to JSON-friendly list
-        questions = [{"id": r[0], "text": r[1]} for r in rows]
-        
-        conn.close()
-        return questions
-    except Exception as e:
-        logger.error(f"Error fetching questions: {e}", exc_info=True)
-        return []
+    # ✅ CALL THE DB MODULE
+    return database.get_questions()
 
 @app.get("/roles")
 def get_roles():
-    """
-    Fetches a unique list of job roles from the database.
-    """
-    try:
-        conn = sqlite3.connect("skills.db")
-        cursor = conn.cursor()
-        
-        # Get unique roles sorted alphabetically
-        cursor.execute("SELECT DISTINCT role FROM role_descriptions ORDER BY role ASC")
-        rows = cursor.fetchall()
-        
-        # Convert list of tuples [('Role A',), ('Role B',)] to simple list ['Role A', 'Role B']
-        roles = [row[0] for row in rows]
-        
-        conn.close()
-        return roles
-    except Exception as e:
-        logger.error(f"Error fetching questions: {e}", exc_info=True)
-        logger.error(f"Error fetching roles: {e}", exc_info=True)
-
-        return [] # Return empty list on failure
+    # ✅ CALL THE DB MODULE
+    return database.get_roles()
 
 @app.post("/upload_resume")
 async def upload_resume(file: UploadFile = File(...)):
@@ -768,7 +643,7 @@ async def analyze_stream(request: AnalyzeRequest):
             yield json.dumps({"type": "step", "step_id": 1, "message": "Reading Context..."}) + "\n"
 
             loop = asyncio.get_event_loop()
-            detailed_skills_str = await loop.run_in_executor(None, get_detailed_skills, request.target_role)
+            detailed_skills_str = await loop.run_in_executor(None, database.get_detailed_skills, request.target_role)
             
             # --- STEP 2: MANAGER ANALYSIS ---
             yield json.dumps({"type": "step", "step_id": 2, "message": "Manager Analysis..."}) + "\n"
@@ -880,43 +755,8 @@ async def match_skills(request: Request):
                 "message": f"Querying DB for '{target_role}'..."
             }) + "\n"
             
-            # --- A. CONNECT TO DB ---
-            conn = sqlite3.connect("skills.db")
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            
-            query = """
-                SELECT 
-                    COALESCE(s.title, rs.skill_title) as title, 
-                    rs.skill_code, 
-                    rs.proficiency,             -- ✅ CORRECT (New location)
-                    GROUP_CONCAT(d.detail_item, '; ') as knowledge_list
-                FROM role_skills rs 
-                LEFT JOIN skill_definitions s ON rs.skill_code = s.skill_code 
-                LEFT JOIN skill_details d ON rs.skill_code = d.skill_code
-                WHERE rs.role = ? 
-                GROUP BY rs.skill_code
-                LIMIT 8
-            """
-            cursor.execute(query, (target_role,))
-            rows = cursor.fetchall()
-            conn.close()
-            
             # --- B. BUILD detailed_skills LIST (CRITICAL: DO THIS BEFORE COUNTING) ---
-            detailed_skills = []
-            for row in rows:
-                detailed_skills.append({
-                    "skill": row["title"],
-                    "code": row["skill_code"],
-                    # This reads the column we just selected above
-                    "level": row["proficiency"] if row["proficiency"] else "Standard", 
-                    "required_knowledge": (row["knowledge_list"][:300] + "...") if row["knowledge_list"] else "General competency"
-                })
-
-            # Handle case where DB is empty
-            if not detailed_skills:
-                 logger.warning(f"No skills found for {target_role}, using default fallback.")
-                 detailed_skills = [{"skill": "General Competency", "code": "N/A", "level": "Standard", "required_knowledge": "General professional skills"}]
+            detailed_skills = database.get_match_skills_data
 
             # --- C. NOW WE CAN SAFELY COUNT ---
             count = len(detailed_skills)
