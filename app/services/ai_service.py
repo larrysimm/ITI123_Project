@@ -57,7 +57,7 @@ def init_ai_models():
                 temperature=0.2, 
                 google_api_key=settings.GOOGLE_API_KEY
             )
-            logger.info(f"Gemini Init: {mask_key(settings.GOOGLE_API_KEY)}")
+            logger.info(f"✅ Gemini Initialized successfully. Google API: {mask_key(settings.GOOGLE_API_KEY)}")
         except Exception as e: logger.error(f"Gemini Fail: {e}")
 
     # Initialize OpenAI
@@ -68,7 +68,7 @@ def init_ai_models():
                 temperature=0.2, 
                 api_key=settings.OPENAI_API_KEY
             )
-            logger.info(f"OpenAI Init: {mask_key(settings.OPENAI_API_KEY)}")
+            logger.info(f"✅ OpenAI Initialized successfully. OpenAI API: {mask_key(settings.OPENAI_API_KEY)}")
         except Exception as e: logger.error(f"OpenAI Fail: {e}")
 
     # Initialize Groq
@@ -79,13 +79,13 @@ def init_ai_models():
                 temperature=0.2, 
                 groq_api_key=settings.GROQ_API_KEY
             )
-            logger.info(f"Groq Init: {mask_key(settings.GROQ_API_KEY)}")
+            logger.info(f"✅ Groq Initialized successfully. Groq API: {mask_key(settings.GROQ_API_KEY)}")
         except Exception as e: logger.error(f"Groq Fail: {e}")
 
 # --- PROMPTS ---
 manager_prompt = ChatPromptTemplate.from_template(
     """
-    You are a skeptcial, high-standards Hiring Manager for a {role} position.
+    You are a skeptical, high-standards Hiring Manager for a {role} position.
     
     THE ROLE REQUIRES THESE SPECIFIC COMPETENCIES (from our internal spec):
     {detailed_skills}

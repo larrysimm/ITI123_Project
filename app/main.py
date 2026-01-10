@@ -37,7 +37,7 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     logger.info(">>> SERVER STARTING UP <<<")
-    
+
     initialize.init_db()
     ai_service.init_ai_models()
     ai_service.load_star_guide()
@@ -61,7 +61,7 @@ async def verify_secret_header(request: Request, call_next):
     # Check for the secret header
     client_secret = request.headers.get("X-Poly-Secret")
     
-    if client_secret != API_SECRET:
+    if client_secret != settings.API_SECRET:
         # Reject the request
         return json.dumps({"detail": "Unauthorized: Invalid Secret"}), 401
         
@@ -218,7 +218,7 @@ async def analyze_stream(request: AnalyzeRequest):
                 ai_service.oach_prompt,
                 {"manager_critique": manager_feedback_clean, 
                  "student_answer": request.student_answer,
-                 "star_guide_content": STAR_GUIDE_TEXT},
+                 "star_guide_content": ai_service.STAR_GUIDE_TEXT},
                 "Coach Agent"
             )
             
