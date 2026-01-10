@@ -153,12 +153,51 @@ if groq_key:
 else:
     logger.warning("⚠️ GROQ_API_KEY not found. Skipping Groq.")
 
+# Fallback Function if all models fail
+def get_static_fallback(step_name: str, inputs: dict) -> str:
+    """
+    Returns a generic, safe response when all AI models fail.
+    Used to prevent the frontend from crashing during high traffic/outages.
+    """
+    logger.warning(f"🪂 DEPLOYING STATIC PARACHUTE for {step_name}")
+    
+    # 1. Fallback for "Skill Matcher" (Gap Analysis)
+    if step_name == "Skill Matcher":
+        return json.dumps({
+            "matched_skills": [
+                {
+                    "skill": "General Professionalism",
+                    "code": "GEN-PRO-001",
+                    "reason": "Resume detected, but AI deep analysis is currently offline due to high server load."
+                }
+            ],
+            "missing_skills": [
+                {
+                    "skill": "Technical Deep Dive (System Busy)",
+                    "code": "ERR-503",
+                    "gap": "Our AI analysis servers are currently experiencing very high traffic. Please manually review your specific technical requirements against the job description while we cool down."
+                }
+            ]
+        })
 
+    # 2. Fallback for "Coach Agent" (Interview Coaching) or "Manager Agent"
+    else:
+        # We return a format that works for BOTH Manager and Coach parsing
+        return json.dumps({
+            # Manager-style keys
+            "manager_critique": "⚠️ **System Notification:** High Server Load. We cannot provide specific technical feedback right now.",
+            
+            # Coach-style keys
+            "coach_critique": "Our AI Coach is currently assisting too many users (Capacity Limit Reached). However, a universal tip is to ensure your answer follows the STAR method strictly.",
+            "rewritten_answer": "**Situation:** [Your Context] **Task:** [Your Challenge] **Action:** [Specific Steps Taken] **Result:** [Quantifiable Outcome]. \n\n*(Please try again in 5 minutes for a specific rewrite).* "
+        })
+    
 async def run_chain_with_fallback(prompt_template, inputs, step_name="AI"):
     """
     Strategy:
     1. Tier 1: OpenAI & Gemini (Randomize order 50/50).
     2. Tier 2: Groq (Only if BOTH Tier 1 models fail).
+    3. Tier 3: Static Fallback (If ALL AI fails).
     """
 
     # Helper to run and log tokens
@@ -177,46 +216,65 @@ async def run_chain_with_fallback(prompt_template, inputs, step_name="AI"):
             )
         return response.content
 
-    # 1. DEFINE CHAINS
-    chains = {
-        "OpenAI": prompt_template | openai_llm,
-        "Gemini": prompt_template | gemini_llm,
-        "Groq":   prompt_template | groq_llm
-    }
+    chains = {}
+    
+    # Only create the chain if the LLM actually exists
+    if gemini_llm:
+        chains["Gemini"] = prompt_template | gemini_llm
 
+    if openai_llm:
+        chains["OpenAI"] = prompt_template | openai_llm
+
+    if groq_llm:
+        chains["Groq"]   = prompt_template | groq_llm
+
+    # =========================================================
     # 2. BUILD THE EXECUTION PLAN
-    # Create a list of Tier 1 models
-    tier1 = ["OpenAI", "Gemini"]
+    # =========================================================
+    
+    # Create a list of Tier 1 models (Gemini + OpenAI)
+    tier1 = []
+    
+    # We check if the KEY exists in our valid 'chains' dict
+    if "Gemini" in chains: 
+        tier1.append("Gemini")
+        
+    if "OpenAI" in chains: 
+        tier1.append("OpenAI")
     
     # Shuffle them! (Randomly decides who goes first)
     random.shuffle(tier1) 
     
-    # Add Groq as the final safety net
-    execution_order = tier1 + ["Groq"]
+    # Add Groq as the final safety net (if it exists)
+    execution_order = tier1
+    if "Groq" in chains:
+        execution_order.append("Groq")
     
     logger.info(f"🎲 Execution Plan for {step_name}: {execution_order}")
 
+    # =========================================================
     # 3. EXECUTE WITH FAILOVER
+    # =========================================================
+    if not execution_order:
+        # Case: ALL keys are missing (or app config is broken)
+        logger.critical(f"❌ No AI models available for {step_name}.")
+        return get_static_fallback(step_name, inputs)
+
     last_exception = None
     
     for model_name in execution_order:
         try:
             logger.info(f"🤖 Attempting {step_name} with {model_name}...")
-            
-            # Run the specific chain
-            result = await execute_and_log(chains[model_name], model_name)
-            
-            # If successful, return immediately
-            return result
-            
+            return await execute_and_log(chains[model_name], model_name)
         except Exception as e:
             last_exception = e
             logger.warning(f"⚠️ {model_name} Failed: {e}. Failing over...")
-            # Loop continues to the next model in the list...
 
-    # 4. IF EVERYTHING FAILS
-    logger.critical(f"❌ ALL AI MODELS FAILED for {step_name}.")
-    raise last_exception
+    # =========================================================
+    # 4. FINAL FALLBACK (Parachute)
+    # =========================================================
+    logger.critical(f"❌ ALL AI MODELS FAILED for {step_name}. Deploying Static Response.")
+    return get_static_fallback(step_name, inputs)
 
 def extract_clean_json(text):
     logger.debug("Raw AI text received for parsing.")
