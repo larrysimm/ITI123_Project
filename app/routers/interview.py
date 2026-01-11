@@ -63,6 +63,7 @@ async def analyze_stream(request: AnalyzeRequest):
                     "manager_critique": man_feedback, 
                     "student_answer": request.student_answer,
                     "star_guide_content": ai_service.STAR_GUIDE_TEXT,
+                    "question": request.question,
                     "resume_text": request.resume_text[:10000],
                 },
                 "Coach Agent"
