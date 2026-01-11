@@ -109,7 +109,7 @@ async def match_skills(request: Request):
                 "message": "Anonymizing data & Initializing AI Analyst..."
             }) + "\n"
 
-            clean_resume_text = ai_service.redact_pii(resume_text[:5000])
+            clean_resume_text = parsers.redact_pii(resume_text[:5000])
 
             # Simulate thinking steps for the UI trace
             await asyncio.sleep(0.2)
