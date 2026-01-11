@@ -147,3 +147,26 @@ match_skills_prompt: |
           }} 
       ]
   }}
+
+resume_validator_prompt: |
+  You are a Document Classifier. 
+  TASK: Analyze the provided text and determine if it is a legitimate Professional Resume/CV.
+
+  CRITERIA FOR VALID RESUME:
+  1. Contains professional headers (Experience, Education, Skills, Projects).
+  2. Contains contact identifiers (Email, Phone, LinkedIn, Location).
+  3. Uses professional formatting/language suitable for a job application.
+
+  CRITERIA FOR INVALID:
+  - Cooking recipes, essays, homework, code snippets, novels, or blank text.
+  - Job Descriptions (This is a resume parser, not a JD parser).
+
+  INPUT TEXT (First 2000 chars):
+  "{text_sample}"
+
+  OUTPUT JSON ONLY:
+  {{
+  "isValid": boolean, 
+  "reason": "Short explanation of why this was rejected (if false)."
+  }}
+  """

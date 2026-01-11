@@ -171,6 +171,39 @@ def get_static_fallback(step_name: str, inputs: dict) -> str:
             "rewritten_answer": "**Situation:** [Your Context] **Task:** [Your Challenge] **Action:** [Specific Steps Taken] **Result:** [Quantifiable Outcome]. \n\n*(Please try again in 5 minutes for a specific rewrite).* "
         })
     
+async def validate_is_resume(text: str):
+    """
+    Uses AI to check if the extracted text looks like a resume.
+    """
+    try:
+        # 1. Get the prompt template
+        prompt_template = get_prompt("resume_validator_prompt")
+        
+        # 2. Prepare inputs (Truncate text to save tokens)
+        inputs = {"text_sample": text[:2000]}
+        
+        # 3. Run with your existing Fallback Engine (Robust!)
+        response_text = await run_chain_with_fallback(
+            prompt_template, 
+            inputs, 
+            step_name="Resume Validator"
+        )
+        
+        # 4. Parse the JSON result
+        result = parsers.extract_clean_json(response_text)
+        
+        # Fail-safe: If JSON parsing fails, assume it's valid to avoid blocking user
+        if not result:
+            logger.warning("⚠️ Could not parse Resume Validator response. Defaulting to Valid.")
+            return {"isValid": True, "reason": "AI Validation Error (Fail Open)"}
+            
+        return result
+
+    except Exception as e:
+        logger.error(f"❌ Resume Validation Logic Failed: {e}")
+        # Default to True so we don't block users if the server crashes
+        return {"isValid": True, "reason": "System Error"}
+    
 async def run_chain_with_fallback(prompt_template, inputs, step_name="AI"):
     """
     Strategy:

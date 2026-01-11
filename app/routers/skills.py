@@ -55,7 +55,21 @@ async def upload_resume(file: UploadFile = File(...)):
                 "warning": "File appears to be a scanned image. OCR may be required.",
                 "extracted_text": ""
             }
-
+        
+        logger.info("🤖 Verifying document content with AI...")
+        
+        # Call the new function in ai_service
+        validation_result = await ai_service.validate_is_resume(text)
+        
+        if not validation_result.get("isValid", True):
+            reason = validation_result.get("reason", "Unknown")
+            logger.warning(f"⛔ AI Rejected Resume: {reason}")
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Uploaded file does not appear to be a resume. AI says: {reason}"
+            )
+        
+        logger.info("✅ AI confirmed document is a valid resume.")
         logger.info(f"✅ Text extraction successful. Length: {len(text)} chars")
         return {
             "filename": file.filename, 
