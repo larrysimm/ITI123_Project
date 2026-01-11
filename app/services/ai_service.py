@@ -4,14 +4,15 @@ import re
 import random
 import time
 import yaml
+
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
-from ..utils import parsers
+from openai import AsyncOpenAI
 
-# Import settings to get API Keys
 from ..core.config import settings, logger
+from ..utils import parsers
 
 # --- GLOBAL STATE ---
 STAR_GUIDE_TEXT = "Standard STAR Method principles."
@@ -277,3 +278,57 @@ async def run_chain_with_fallback(prompt_template, inputs, step_name="AI"):
     # =========================================================
     logger.critical(f"❌ ALL AI MODELS FAILED for {step_name}. Deploying Static Response.")
     return get_static_fallback(step_name, inputs)
+
+async def _transcribe_openai(file_obj):
+    """Try OpenAI Whisper-1"""
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+    return await client.audio.transcriptions.create(
+        model="whisper-1", 
+        file=file_obj
+    )
+
+async def _transcribe_groq(file_obj):
+    """Try Groq Whisper-Large (Fast!)"""
+    client = AsyncOpenAI(
+        api_key=settings.GROQ_API_KEY, 
+        base_url="https://api.groq.com/openai/v1"
+    )
+    return await client.audio.transcriptions.create(
+        model="whisper-large-v3", 
+        file=file_obj
+    )
+
+async def transcribe_audio_with_fallback(file_obj):
+    """
+    Attempts to transcribe audio using OpenAI first, then falls back to Groq.
+    Crucial: Handles file pointer rewinding between attempts.
+    """
+    # Define the order of providers
+    providers = [
+        ("OpenAI", _transcribe_openai),
+        ("Groq", _transcribe_groq)
+    ]
+
+    last_error = None
+
+    for name, func in providers:
+        try:
+            # 1. Rewind file to start (Crucial for retries!)
+            await file_obj.seek(0)
+            
+            logger.info(f"🎤 Attempting transcription with {name}...")
+            
+            # 2. Call the provider
+            transcript = await func(file_obj)
+            
+            logger.info(f"✅ Transcription success with {name}")
+            return transcript.text
+
+        except Exception as e:
+            logger.warning(f"⚠️ {name} Transcription Failed: {e}")
+            last_error = e
+            # Loop continues to the next provider...
+
+    # If we exit the loop, everything failed
+    logger.error("❌ All transcription services failed.")
+    return "Error: Could not transcribe audio. Please type your answer."

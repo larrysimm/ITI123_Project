@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .db import initialize 
 from .core.config import settings, logger
 from .services import ai_service
-from .routers import interview, skills
+from .routers import interview, skills, audio
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +25,7 @@ app.add_middleware(
 
 app.include_router(interview.router, prefix="/api/interview", tags=["Interview"])
 app.include_router(skills.router, prefix="/api/skills", tags=["Skills"])
+app.include_router(audio.router, prefix="/api/audio", tags=["Audio"])
 
 @app.on_event("startup")
 async def startup_event():
