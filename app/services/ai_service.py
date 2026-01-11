@@ -1,8 +1,8 @@
-# File: app/services/ai_service.py
 import os
 import json
 import re
 import random
+import yaml
 from pypdf import PdfReader
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
@@ -14,11 +14,29 @@ from ..core.config import settings, logger
 
 # --- GLOBAL STATE ---
 STAR_GUIDE_TEXT = "Standard STAR Method principles."
+PROMPTS = {}
 gemini_llm = None
 openai_llm = None
 groq_llm = None
 
 # --- INITIALIZATION ---
+def load_prompts():
+    """Loads prompts from app/prompts.yaml"""
+    global PROMPTS
+    prompt_path = os.path.join(os.path.dirname(__file__), "..", "prompts.yaml")
+    
+    if os.path.exists(prompt_path):
+        try:
+            with open(prompt_path, "r", encoding="utf-8") as f:
+                PROMPTS = yaml.safe_load(f)
+            logger.info("✅ Prompts loaded from YAML.")
+        except Exception as e:
+            logger.error(f"❌ Failed to load prompts.yaml: {e}")
+            # Fallback to empty dict (will cause errors if not handled, but better than crash)
+            PROMPTS = {}
+    else:
+        logger.warning(f"⚠️ prompts.yaml not found at {prompt_path}")
+
 def load_star_guide():
     """
     Loads the STAR Method Guide from a local PDF into memory.
@@ -81,6 +99,14 @@ def init_ai_models():
             )
             logger.info(f"✅ Groq Initialized successfully. Groq API: {mask_key(settings.GROQ_API_KEY)}")
         except Exception as e: logger.error(f"Groq Fail: {e}")
+
+def get_prompt(prompt_name):
+    """Retrieves a prompt template from the loaded YAML."""
+    raw_text = PROMPTS.get(prompt_name, "")
+    if not raw_text:
+        logger.error(f"Prompt '{prompt_name}' not found!")
+        return ChatPromptTemplate.from_template("Error: Prompt missing.")
+    return ChatPromptTemplate.from_template(raw_text)
 
 # --- PROMPTS ---
 manager_prompt = ChatPromptTemplate.from_template(

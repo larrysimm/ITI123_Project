@@ -41,6 +41,7 @@ async def startup_event():
 
     initialize.init_db()
     ai_service.init_ai_models()
+    ai_service.load_prompts()
     ai_service.load_star_guide()
 
     logger.info("Server is ready to accept requests.")
@@ -187,7 +188,7 @@ async def analyze_stream(request: AnalyzeRequest):
             yield json.dumps({"type": "step", "step_id": 2, "message": "Manager Analysis..."}) + "\n"
             
             manager_res = await ai_service.run_chain_with_fallback(
-                ai_service.manager_prompt,
+                ai_service.get_prompt("manager_prompt"),
                 {
                     "role": request.target_role,
                     "detailed_skills": detailed_skills_str,
@@ -209,7 +210,7 @@ async def analyze_stream(request: AnalyzeRequest):
             yield json.dumps({"type": "step", "step_id": 3, "message": "Coach Refinement..."}) + "\n"
             
             coach_res = await ai_service.run_chain_with_fallback(
-                ai_service.coach_prompt,
+                ai_service.get_prompt("coach_prompt"),
                 {
                     "manager_critique": man_feedback, 
                     "student_answer": request.student_answer,
@@ -300,7 +301,7 @@ async def match_skills(request: Request):
 
             # Run the AI Chain
             ai_response_str = await ai_service.run_chain_with_fallback(
-                ai_service.match_skills_prompt, 
+                ai_service.get_prompt("match_skills_prompt"), 
                 inputs, 
                 step_name="Skill Matcher"
             )
