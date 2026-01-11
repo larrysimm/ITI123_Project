@@ -72,11 +72,12 @@ def init_db():
     
     try:
         if os.path.exists(EXCEL_FILE):
-            logger.info("⚙️  Processing Excel Data...")
+            logger.info("⚙️  Creating Database Tables from Excel...")
             xls = pd.ExcelFile(EXCEL_FILE)
 
             # --- 1. Descriptions ---
             if "Job Role_Description" in xls.sheet_names:
+                logger.info("   -> Creating Role Descriptions Table")
                 df = pd.read_excel(xls, sheet_name="Job Role_Description")
                 # CLEANUP: Rename columns to match what your API expects
                 df = df.rename(columns={
@@ -85,10 +86,11 @@ def init_db():
                     'Performance Expectation': 'expectations'
                 })
                 df[['role', 'description', 'expectations']].to_sql('role_descriptions', conn, if_exists='replace', index=False)
-                logger.info("   -> Role Descriptions Loaded")
+                logger.info("   -> Role Descriptions Table Created")
 
             # --- 2. Tasks ---
             if "Job Role_CWF_KT" in xls.sheet_names:
+                logger.info("   -> Creating Role Tasks Table")
                 df = pd.read_excel(xls, sheet_name="Job Role_CWF_KT")
                 df = df.rename(columns={
                     'Job Role': 'role',
@@ -96,10 +98,11 @@ def init_db():
                     'Key Tasks': 'task'
                 })
                 df[['role', 'function', 'task']].to_sql('role_tasks', conn, if_exists='replace', index=False)
-                logger.info("   -> Role Tasks Loaded")
+                logger.info("   -> Role Tasks Table Created")
 
             # --- 3. Role-Skill Map (THIS FIXES YOUR ERROR) ---
             if "Job Role_TCS_CCS" in xls.sheet_names:
+                logger.info("   -> Creating Role-Skill Map Table")
                 df = pd.read_excel(xls, sheet_name="Job Role_TCS_CCS")
                 
                 # 🛑 CRITICAL FIX: Rename "Proficiency Level" to "proficiency"
@@ -113,10 +116,11 @@ def init_db():
                 # Select only the renamed columns to be safe
                 df = df[['role', 'skill_title', 'skill_code', 'proficiency']]
                 df.to_sql('role_skills', conn, if_exists='replace', index=False)
-                logger.info("   -> Role-Skill Map Loaded")
+                logger.info("   -> Role-Skill Table Created")
 
             # --- 4. Skill Definitions ---
             if "TSC_CCS_Key" in xls.sheet_names:
+                logger.info("   -> Creating Skill Definitions Table")
                 df = pd.read_excel(xls, sheet_name="TSC_CCS_Key")
                 df = df.rename(columns={
                     'TSC Code': 'skill_code',
@@ -124,20 +128,21 @@ def init_db():
                     'TSC_CCS Description': 'description'
                 })
                 df[['skill_code', 'title', 'description']].to_sql('skill_definitions', conn, if_exists='replace', index=False)
-                logger.info("   -> Skill Definitions Loaded")
+                logger.info("   -> Skill Definitions Table Created")
 
             # --- 5. Skill Details ---
             if "TSC_CCS_K&A" in xls.sheet_names:
+                logger.info("   -> Creating Skill Details Table")
                 df = pd.read_excel(xls, sheet_name="TSC_CCS_K&A")
                 df = df.rename(columns={
                     'TSC_CCS Code': 'skill_code',
                     'Knowledge / Ability Items': 'detail_item'
                 })
                 df[['skill_code', 'detail_item']].to_sql('skill_details', conn, if_exists='replace', index=False)
-                logger.info("   -> Skill Details Loaded")
+                logger.info("   -> Skill Details Table Created")
 
     except Exception as e:
-        logger.error(f"❌ Excel Processing Error: {e}", exc_info=True)
+        logger.error(f"❌ Database Creation Error: {e}", exc_info=True)
 
     # --- Create Questions Table ---
     conn.execute("""
@@ -175,6 +180,40 @@ def init_db():
     conn.commit()
     conn.close()
     logger.info(f"✅ SUCCESS! Database ready.")
+    log_table_counts()
+
+import sqlite3
+from ..core.config import settings, logger  # Ensure these are imported
+
+def log_table_counts():
+    """Helper to print row counts for every table in the DB."""
+    try:
+        # Create a temporary connection just for checking stats
+        conn = sqlite3.connect(settings.DB_PATH)
+        cursor = conn.cursor()
+        
+        # 1. Get a list of all tables (excluding internal sqlite tables)
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
+        tables = cursor.fetchall()
+        
+        logger.info("📊 --- DATABASE STATISTICS ---")
+        
+        if not tables:
+            logger.warning("   ⚠️ No tables found in the database!")
+        
+        # 2. Loop through and count rows
+        for table in tables:
+            table_name = table[0]
+            cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+            count = cursor.fetchone()[0]
+            # Print with nice formatting
+            logger.info(f"   🔹 {table_name:<25}: {count} records")
+            
+        logger.info("-----------------------------")
+        conn.close()
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to fetch database stats: {e}")
 
 if __name__ == "__main__":
     init_db()
