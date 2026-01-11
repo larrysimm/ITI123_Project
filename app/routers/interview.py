@@ -12,7 +12,7 @@ from ..db import database
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-@router.post("/analyze")
+@router.post("/analyze_stream")
 async def analyze_stream(request: AnalyzeRequest):
     async def event_generator():
         try:
@@ -80,7 +80,9 @@ async def analyze_stream(request: AnalyzeRequest):
 
             # 4. Final Result
             yield json.dumps({"type": "result", "data": {
+                "manager_thinking": man_thinking,
                 "manager_critique": man_feedback,
+                "coach_thinking": coach_thinking,
                 "coach_critique": coach_data.get("coach_critique", "No critique available."),
                 "rewritten_answer": coach_data.get("rewritten_answer", "No answer generated.")
             }}) + "\n"
