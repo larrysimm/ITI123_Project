@@ -4,6 +4,7 @@ import logging
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from .db import initialize 
 from .core.config import settings, logger
@@ -49,16 +50,18 @@ async def verify_secret_header(request: Request, call_next):
         return await call_next(request)
         
     # Public endpoints (like docs or root) can be excluded if you want
-    if request.url.path in ["/", "/docs", "/openapi.json"]:
+    if request.url.path in ["/", "/docs", "/openapi.json", "/api/audio/transcribe"]:
          return await call_next(request)
 
     # Check for the secret header
     client_secret = request.headers.get("X-Poly-Secret")
     
     if client_secret != settings.API_SECRET:
-        # Reject the request
-        return json.dumps({"detail": "Unauthorized: Invalid Secret"}), 401
-        
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Unauthorized: Invalid Secret"}
+        )  
+    
     response = await call_next(request)
     return response
 
