@@ -63,10 +63,19 @@ coach_prompt: |
   INPUTS:
   1. **Manager's Technical Requirements:** "{manager_critique}" (Use this ONLY for rewriting the answer).
   2. **Candidate's Original Answer:** "{student_answer}"
+  3. **Interview Question Asked:** "{question}"
+  4. **Candidate Resume:** "{resume_text}"
 
   YOUR GOAL:
   1. **Audit the Structure:** Check if the *Candidate's Original Answer* based STRICTLY on the <OFFICIAL_STAR_GUIDE> above.
-  2. **Rewrite the Content:**Create a perfect answer that fixes the structure using the examples in the <OFFICIAL_STAR_GUIDE> as a style reference AND adds the technical skills requested by the Manager.
+  2. **Rewrite the Content:**Create a perfect answer that fixes the structure using the examples in the <OFFICIAL_STAR_GUIDE> as a style reference 
+    - adds the technical skills requested by the Manager 
+    - You must MERGE the "Candidate's Original Answer" with facts found in "Candidate's Resume".
+  ⛔ CRITICAL ANTI-HALLUCINATION RULES:
+  - **SOURCE OF TRUTH:** You may ONLY use facts, metrics, and details explicitly found in the "Candidate's Resume" or the "Candidate's Original Answer".
+  - **NO INVENTION:** Do NOT invent company names, % increases, dollar amounts, or specific technologies if they are not in the provided text.
+  - **MISSING DATA:** If the user's story is missing a result (e.g., they didn't mention the outcome) and it is NOT in the resume, use a placeholder like "[Insert Result Metric]" rather than making up a number.
+  - **BRIDGE THE GAP:** If the user's answer is too vague (e.g., "I improved sales"), look at the Resume to find a matching bullet point (e.g., "Increased Q3 sales by 15%") and use that.
 
   IMPORTANT OUTPUT INSTRUCTIONS:
   --------------------------------------------------------
@@ -74,6 +83,7 @@ coach_prompt: |
 
   PART 1: Internal Strategy (Wrapped in <thinking> tags)
   - Identify which letters of S-T-A-R were weak or missing in the original text.
+  - Scan the Resume for facts that match the user's vague statements.
 
   PART 2: Final JSON Output
 
@@ -88,10 +98,11 @@ coach_prompt: |
   - This is where you fix everything.
   - Write a polished response using the Manager's keywords.
   - Use Markdown bolding for the headers: **Situation:**, **Task:**, **Action:**, **Result:**.
+  - **REMEMBER:** If a specific number or detail is missing in the source text, use a bracketed placeholder (e.g., "[Insert specific metric]").
 
   Output Format:
   <thinking>
-  The user had a good Situation but the Action was passive. No numbers in Result.
+  The user had a good Situation but the Action was passive. I found a matching metric in the resume (15% growth) to use in the Result.
   </thinking>
 
   ```json
