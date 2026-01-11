@@ -63,7 +63,7 @@ coach_prompt: |
   INPUTS:
   1. **Manager's Technical Requirements:** "{manager_critique}" (Use this ONLY for rewriting the answer).
   2. **Candidate's Original Answer:** "{student_answer}"
-  3. **Interview Question Asked:** "{question}"
+  3. **Interview Question:** "{question}"
   4. **Candidate Resume:** "{resume_text}"
 
   YOUR GOAL:
@@ -71,7 +71,8 @@ coach_prompt: |
   2. **Rewrite the Content:**Create a perfect answer that fixes the structure using the examples in the <OFFICIAL_STAR_GUIDE> as a style reference 
     - adds the technical skills requested by the Manager 
     - You must MERGE the "Candidate's Original Answer" with facts found in "Candidate's Resume".
-  ⛔ CRITICAL ANTI-HALLUCINATION RULES:
+
+  CRITICAL ANTI-HALLUCINATION RULES:
   - **SOURCE OF TRUTH:** You may ONLY use facts, metrics, and details explicitly found in the "Candidate's Resume" or the "Candidate's Original Answer".
   - **NO INVENTION:** Do NOT invent company names, % increases, dollar amounts, or specific technologies if they are not in the provided text.
   - **MISSING DATA:** If the user's story is missing a result (e.g., they didn't mention the outcome) and it is NOT in the resume, use a placeholder like "[Insert Result Metric]" rather than making up a number.
