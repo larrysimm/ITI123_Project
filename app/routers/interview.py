@@ -40,7 +40,7 @@ async def analyze_stream(request: AnalyzeRequest):
                 {
                     "role": request.target_role,
                     "detailed_skills": detailed_skills_str,
-                    "resume_text": request.resume_text[:2000],
+                    "resume_text": request.resume_text[:10000],
                     "question": request.question,
                     "skill_gaps": skill_gaps_str,
                     "student_answer": request.student_answer
@@ -62,7 +62,8 @@ async def analyze_stream(request: AnalyzeRequest):
                 {
                     "manager_critique": man_feedback, 
                     "student_answer": request.student_answer,
-                    "star_guide_content": ai_service.STAR_GUIDE_TEXT
+                    "star_guide_content": ai_service.STAR_GUIDE_TEXT,
+                    "resume_text": request.resume_text[:10000],
                 },
                 "Coach Agent"
             )
