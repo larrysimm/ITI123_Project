@@ -77,11 +77,15 @@ async def upload_resume(file: UploadFile = File(...)):
             "extracted_text": text[:10000] # Truncate for response
         }
 
-    except Exception as e:
-        logger.error(f"❌ PDF Parsing Failed: {e}")
-        # Return 400, not 500, because the error is likely the user's bad file, not your server logic
-        raise HTTPException(status_code=400, detail="File is corrupted or encrypted.")
+    except HTTPException as he:
+        # If we raised a specific HTTP error (like the AI rejection), 
+        # let it pass through unmodified!
+        raise he 
 
+    except Exception as e:
+        # Only catch UNEXPECTED crashes here (like PDF parser bugs)
+        logger.error(f"❌ PDF Parsing Failed: {e}")
+        raise HTTPException(status_code=400, detail="File is corrupted or encrypted.")
 
 @router.post("/match_skills")
 async def match_skills(request: Request):
