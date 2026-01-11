@@ -4,12 +4,11 @@ import re
 import random
 import time
 import yaml
-from pypdf import PdfReader
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
-from .utils import parsers
+from ..utils import parsers
 
 # Import settings to get API Keys
 from ..core.config import settings, logger
