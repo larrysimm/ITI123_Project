@@ -2,7 +2,7 @@ import os
 import json
 import re
 import random
-from time import time
+import time
 import yaml
 from pypdf import PdfReader
 from langchain_google_genai import ChatGoogleGenerativeAI
