@@ -2,6 +2,7 @@ import os
 import json
 import re
 import random
+from time import time
 import yaml
 from pypdf import PdfReader
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -19,7 +20,6 @@ gemini_llm = None
 openai_llm = None
 groq_llm = None
 
-# --- INITIALIZATION ---
 def load_prompts():
     """Loads prompts from app/prompts.yaml"""
     global PROMPTS
@@ -57,12 +57,10 @@ def load_star_guide():
     else:
         logger.warning(f"⚠️ '{settings.STAR_GUIDE_PATH}' not found. Using default AI knowledge.")
 
-# Helper to safely mask keys
 def mask_key(key: str) -> str:
     if not key or len(key) < 5:
         return "❌ NOT SET"
     return f"✅ ...{key[-4:]}"  # Shows only last 4 chars
-
 
 def init_ai_models():
     global gemini_llm, openai_llm, groq_llm
@@ -108,155 +106,6 @@ def get_prompt(prompt_name):
         return ChatPromptTemplate.from_template("Error: Prompt missing.")
     return ChatPromptTemplate.from_template(raw_text)
 
-# --- PROMPTS ---
-manager_prompt = ChatPromptTemplate.from_template(
-    """
-    You are a skeptical, high-standards Hiring Manager for a {role} position.
-    
-    THE ROLE REQUIRES THESE SPECIFIC COMPETENCIES (from our internal spec):
-    {detailed_skills}
-    
-    CANDIDATE'S RESUME SUMMARY:
-    {resume_text}
-
-    CRITICAL SKILL GAPS (FROM AUDIT)
-    The following skills were marked as MISSING in the candidate's resume:
-    {skill_gaps}
-    
-    INTERVIEW QUESTION:
-    "{question}"
-    
-    CANDIDATE'S ANSWER:
-    "{student_answer}"
-    
-    YOUR TASK:
-    Evaluate this answer strictly. 
-    1. **Cite Your Sources:** You MUST reference the **Ref Code** (e.g., [ICT-DIT-3002-1.1]) when critiquing a specific skill.
-       - *Bad:* "You lack system design skills."
-       - *Good:* "Regarding **System Design (Ref: ICT-DES-4002-1.1)**, the spec requires Level 4 proficiency, but your answer was generic."
-    2. **Depth:** Is the answer vague or does it show specific technical knowledge mentioned in the requirements?
-    3. **Compare Explicitly:** - Look at the **"Key Knowledge"** field in the data source. Did the candidate mention those specific keywords?
-       - If the data says "Level 5", but the candidate sounds like a junior, point out the gap.
-    4. **Skill Demonstration:** Does the answer provide evidence for the {role} skills?
-    5. **Gap Mitigation:** specifically check if the answer helps cover any of the **Critical Skill Gaps** listed above. 
-       - If they demonstrate a missing skill here, acknowledge it enthusiastically.
-       - If they miss a chance to demonstrate a missing skill, point it out.
-    6. **Verdict:** Be direct and professional. If they missed a key technical requirement, say it.
-    
-    IMPORTANT OUTPUT INSTRUCTIONS:
-    --------------------------------------------------------
-    You must output your response in TWO parts:
-    
-    PART 1: Internal Thought Process (Wrapped in <thinking> tags)
-    - Briefly analyze the candidate's answer against the skill gaps.
-    - Note down which specific Reference Codes you need to cite.
-    - Decide if the tone should be harsh or approving.
-    
-    PART 2: Final Manager Feedback
-    - The actual response to the candidate (approx 100 words).
-    - Focus on content and competence.
-    
-    Example Format:
-    <thinking>
-    Candidate mentioned Python, but the Ref Code ICT-PRG-3001 requires Java. 
-    They missed the gap on 'Cloud Computing'. I need to be critical about that.
-    </thinking>
-    
-    [Your Final Critique Here]
-    """
-)
-
-coach_prompt = ChatPromptTemplate.from_template(
-    """
-    You are an expert Interview Coach specializing in the STAR method (Situation, Task, Action, Result).
-    
-    RELIES ON THIS GUIDE FOR COACHING:
-    <OFFICIAL_STAR_GUIDE>
-    {star_guide_content}
-    </OFFICIAL_STAR_GUIDE>
-
-    INPUTS:
-    1. **Manager's Technical Requirements:** "{manager_critique}" (Use this ONLY for rewriting the answer).
-    2. **Candidate's Original Answer:** "{student_answer}"
-    
-    YOUR GOAL:
-    1. **Audit the Structure:** Check if the *Candidate's Original Answer* based STRICTLY on the <OFFICIAL_STAR_GUIDE> above.
-    2. **Rewrite the Content:**Create a perfect answer that fixes the structure using the examples in the <OFFICIAL_STAR_GUIDE> as a style reference AND adds the technical skills requested by the Manager.
-    
-    IMPORTANT OUTPUT INSTRUCTIONS:
-    --------------------------------------------------------
-    You must output your response in TWO parts:
-    
-    PART 1: Internal Strategy (Wrapped in <thinking> tags)
-    - Identify which letters of S-T-A-R were weak or missing in the original text.
-    
-    PART 2: Final JSON Output
-    
-    Field 1: "coach_critique"
-    - **DO NOT** mention technical skills (e.g., "You lacked Java knowledge").
-    - **FOCUS ONLY** on narrative structure.
-    - Ask: Was the 'Situation' clear? Was the 'Action' vague? Did the 'Result' have numbers?
-    - Example: "Your 'Action' section was too generic and didn't list specific steps. The 'Result' was missing quantifiable metrics."
-    
-    Field 2: "rewritten_answer"
-    - If the original answer was incomprehensible, Do not try to salvage it, INSTEAD, let the user know and give advice on "HOW TO PREPARE FOR A BEHAVIORAL INTERVIEW" from the [STAR_GUIDE] to teach the user the basics. 
-    - This is where you fix everything.
-    - Write a polished response using the Manager's keywords.
-    - Use Markdown bolding for the headers: **Situation:**, **Task:**, **Action:**, **Result:**.
-    
-    Output Format:
-    <thinking>
-    The user had a good Situation but the Action was passive. No numbers in Result.
-    </thinking>
-    
-    ```json
-    {{
-        "coach_critique": "Your original answer failed to follow the STAR method. You combined Situation and Task, and your Result lacked any quantifiable metrics.",
-        "rewritten_answer": "**Situation:** ... **Task:** ... **Action:** ... **Result:** ..."
-    }}
-    ```
-    IMPORTANT RULES:
-    1. Do NOT copy the example text above. Generate NEW content based on the user's input.
-    """
-)
-
-match_skills_prompt = ChatPromptTemplate.from_template(
-    """
-    You are a Senior HR Auditor performing a Compliance Check.
-    
-    ### OFFICIAL DATABASE STANDARDS (Source of Truth)
-    {detailed_skills}
-    
-    ### CANDIDATE RESUME
-    {resume_text}
-    
-    ### TASK
-    Compare the Resume against the Database Standards.
-    
-    1. **Exact Matching:** A "Match" must demonstrate the specific **Required Level** defined in the standard.
-    2. **Citation:** You MUST extract the **Ref Code** (e.g., [ICT-DIT-3002-1.1]) for every skill.
-    
-    ### OUTPUT FORMAT (Strict JSON)
-    {{
-        "matched_skills": [ 
-            {{ 
-                "skill": "Skill Name", 
-                "code": "Ref Code from DB", 
-                "reason": "Resume meets Level [X] requirement. Evidence: [Quote]..." 
-            }} 
-        ],
-        "missing_skills": [ 
-            {{ 
-                "skill": "Skill Name", 
-                "code": "Ref Code from DB", 
-                "gap": "Resume fails to meet Level [X] standard. Missing evidence of [Key Knowledge]..." 
-            }} 
-        ]
-    }}
-    """
-)
-
-# --- HELPER FUNCTIONS ---
 def redact_pii(text):
     """
     Aggressively removes PII (Email, Phone, Address, Name) 
@@ -392,7 +241,6 @@ def get_static_fallback(step_name: str, inputs: dict) -> str:
             "rewritten_answer": "**Situation:** [Your Context] **Task:** [Your Challenge] **Action:** [Specific Steps Taken] **Result:** [Quantifiable Outcome]. \n\n*(Please try again in 5 minutes for a specific rewrite).* "
         })
     
-# --- MAIN EXECUTION ---
 async def run_chain_with_fallback(prompt_template, inputs, step_name="AI"):
     """
     Strategy:
@@ -403,9 +251,32 @@ async def run_chain_with_fallback(prompt_template, inputs, step_name="AI"):
 
     # Helper to run and log tokens
     async def execute_and_log(chain, model_name):
+        # --- 1. LOG INPUT (First 50 words) ---
+        # Convert inputs dict to string and flatten newlines for cleaner logs
+        input_flat = str(inputs).replace('\n', ' ')
+        input_preview = " ".join(input_flat.split()[:50])
+        logger.info(f"📤 [{model_name}] SENDING: {input_preview}...")
+
+        # Start Timer
+        start_time = time.time()
+
+        # --- 2. EXECUTE ---
         response = await chain.ainvoke(inputs)
         
-        # Capture Usage Stats
+        # Stop Timer
+        duration = time.time() - start_time
+
+        # --- 3. LOG OUTPUT (First 50 words) ---
+        content = response.content
+        if content:
+            # Flatten newlines
+            content_flat = content.replace('\n', ' ')
+            output_preview = " ".join(content_flat.split()[:50])
+            logger.info(f"📥 [{model_name}] RECEIVED ({duration:.2f}s): {output_preview}...")
+        else:
+            logger.info(f"📥 [{model_name}] RECEIVED ({duration:.2f}s): [Empty Content]")
+
+        # --- 4. LOG TOKEN USAGE (Your existing code) ---
         usage = response.usage_metadata
         if usage:
             input_tok = usage.get('input_tokens', 0)
@@ -415,6 +286,7 @@ async def run_chain_with_fallback(prompt_template, inputs, step_name="AI"):
                 f"💰 TOKEN USAGE ({step_name} - {model_name}): "
                 f"In={input_tok}, Out={output_tok}, Total={total_tok}"
             )
+            
         return response.content
 
     chains = {}
