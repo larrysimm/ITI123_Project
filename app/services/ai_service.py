@@ -284,7 +284,7 @@ async def _transcribe_openai(file_obj):
     client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
     return await client.audio.transcriptions.create(
         model="whisper-1", 
-        file=file_obj
+        file=(file_obj.filename, file_obj.file)
     )
 
 async def _transcribe_groq(file_obj):
@@ -295,7 +295,7 @@ async def _transcribe_groq(file_obj):
     )
     return await client.audio.transcriptions.create(
         model="whisper-large-v3", 
-        file=file_obj
+        file=(file_obj.filename, file_obj.file)
     )
 
 async def transcribe_audio_with_fallback(file_obj):
