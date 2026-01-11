@@ -9,6 +9,7 @@ from pypdf import PdfReader
 
 from ..services import ai_service
 from ..db import database
+from ..utils import parsers
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -43,17 +44,7 @@ async def upload_resume(file: UploadFile = File(...)):
 
     # --- PROCESSING: Text Extraction ---
     try:
-        # Wrap the bytes in a stream for pypdf
-        pdf_stream = io.BytesIO(content)
-        
-        # Validate parsing works (Defenses against malformed/exploit PDFs)
-        pdf_reader = PdfReader(pdf_stream)
-        
-        text = ""
-        for page in pdf_reader.pages:
-            extracted = page.extract_text()
-            if extracted:
-                text += extracted
+        text = parsers.extract_text_from_pdf(content)
 
         # --- LOGIC CHECK: Is it a scanned image? ---
         if len(text.strip()) < 50:
@@ -152,7 +143,7 @@ async def match_skills(request: Request):
                 "message": "Formatting final JSON report..."
             }) + "\n"
             
-            analysis_result = ai_service.extract_clean_json(ai_response_str)
+            analysis_result = parsers.extract_clean_json(ai_response_str)
             
             if not analysis_result:
                 logger.error("Failed to parse JSON from AI response.")

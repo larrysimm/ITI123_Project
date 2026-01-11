@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from ..schemas import AnalyzeRequest 
 from ..services import ai_service
 from ..db import database
+from ..utils import parsers
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -71,7 +72,7 @@ async def analyze_stream(request: AnalyzeRequest):
 
             # ✅ ROBUST JSON (Prevents Crash)
             # If parsing fails, we default to a safe dictionary, NOT None.
-            coach_data = ai_service.extract_clean_json(coach_json_str)
+            coach_data = parsers.extract_clean_json(coach_json_str)
             if not coach_data:
                 coach_data = {
                     "coach_critique": "Could not parse AI response.",
