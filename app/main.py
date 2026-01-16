@@ -33,6 +33,8 @@ async def startup_event():
     logger.info(">>> SERVER STARTING UP <<<")
 
     initialize.init_db()
+    logger.info("... Checking Vector Database ...")
+    initialize.sync_vector_db()
     ai_service.init_ai_models()
     ai_service.load_prompts()
     ai_service.load_star_guide()
