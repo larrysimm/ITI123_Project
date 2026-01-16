@@ -4,7 +4,9 @@ import os
 import json
 import requests
 import logging
+import chromadb
 from app.core.config import settings
+from app.utils.embeddings import get_embedding_function
 
 # --- LOGGER SETUP ---
 logging.basicConfig(
@@ -24,6 +26,7 @@ DB_FILE = os.path.join(settings.DB_PATH)
 JSON_PATH = os.path.join(settings.JSON_PATH)
 EXCEL_FILE = os.path.join(settings.EXCEL_PATH)
 STAR_FILE = os.path.join(settings.STAR_GUIDE_PATH)
+CHROMA_PATH = os.path.join(BASE_DIR, "chroma_storage")
 
 # Github URLs (Keep your existing URLs)
 GITHUB_EXCEL_URL = "https://raw.githubusercontent.com/larrysimm/skills-data-static/main/jobsandskills-skillsfuture-skills-framework-dataset.xlsx"
@@ -215,5 +218,77 @@ def log_table_counts():
     except Exception as e:
         logger.error(f"❌ Failed to fetch database stats: {e}")
 
+def sync_vector_db():
+    logger.info("🧠 Starting Vector Database Sync...")
+    
+    # 1. Get the correct 'Brain' (OpenAI or Gemini)
+    try:
+        embedding_fn = get_embedding_function()
+    except Exception as e:
+        logger.error(f"⚠️ Skipping Vector Sync (No Valid Key): {e}")
+        return
+
+    # 2. Setup ChromaDB
+    chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
+    
+    # Reset collection to ensure clean state
+    try:
+        chroma_client.delete_collection("skills_hybrid")
+    except:
+        pass
+        
+    collection = chroma_client.create_collection(
+        name="skills_hybrid",
+        embedding_function=embedding_fn
+    )
+
+    # 3. Read from SQL (Join Role + Skill Info)
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    query = """
+        SELECT rs.role, rs.skill_code, s.title, s.description, rs.proficiency
+        FROM role_skills rs
+        JOIN skill_definitions s ON rs.skill_code = s.skill_code
+    """
+    cursor.execute(query)
+    rows = cursor.fetchall()
+    
+    ids, documents, metadatas = [], [], []
+    
+    logger.info(f"   -> Indexing {len(rows)} skills into Vector Store...")
+    
+    for row in rows:
+        role, code, title, desc, level = row
+        unique_id = f"{role}_{code}"
+        
+        # Combine Title + Desc for semantic search
+        embed_text = f"{title}: {desc}"
+        
+        # Metadata for filtering
+        meta = {
+            "role": role,
+            "code": code,
+            "title": title,
+            "level": level if level else "Standard"
+        }
+        
+        ids.append(unique_id)
+        documents.append(embed_text)
+        metadatas.append(meta)
+        
+        # Batch insert every 50 items
+        if len(ids) >= 50:
+            collection.add(ids=ids, documents=documents, metadatas=metadatas)
+            ids, documents, metadatas = [], [], []
+
+    # Insert remaining
+    if ids:
+        collection.add(ids=ids, documents=documents, metadatas=metadatas)
+        
+    conn.close()
+    logger.info("✅ Vector Sync Complete!")
+
 if __name__ == "__main__":
     init_db()
+    sync_vector_db()

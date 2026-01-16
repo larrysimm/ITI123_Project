@@ -13,3 +13,4 @@ pandas
 google-api-core
 pydantic
 openpyxl
+chromadb
