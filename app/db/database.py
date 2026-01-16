@@ -2,7 +2,9 @@
 import sqlite3
 import logging
 import os
-from ..core.config import settings
+import chromadb
+from app.core.config import settings
+from app.utils.embeddings import get_embedding_function
 
 # --- LOGGER SETUP ---
 logger = logging.getLogger(__name__)
@@ -14,7 +16,8 @@ logger = logging.getLogger(__name__)
 # .parent -> app/
 # .parent -> PROJECT_ROOT/
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(CURRENT_DIR)))
+BASE_DIR = os.path.dirname(os.path.dirname(CURRENT_DIR))
+CHROMA_PATH = os.path.join(BASE_DIR, "chroma_storage")
 DB_FILE = settings.DB_PATH
 
 # Fallback if the logic above fails in some envs, assume standard structure
@@ -183,3 +186,56 @@ def get_match_skills_data(target_role):
     except Exception as e:
         logger.error(f"Error in get_match_skills_data: {e}", exc_info=True)
         return []
+    
+def get_hybrid_matches(resume_text, target_role, top_k=8):
+    """
+    Performs Hybrid RAG:
+    1. Try Vector Search (OpenAI -> Gemini)
+    2. If that fails, Fallback to SQL (Keyword Search)
+    """
+    try:
+        # A. Setup Client
+        client = chromadb.PersistentClient(path=CHROMA_PATH)
+        
+        # B. Get the correct 'Brain'
+        embedding_fn = get_embedding_function()
+        
+        # C. Connect to Collection
+        collection = client.get_collection(
+            name="skills_hybrid", 
+            embedding_function=embedding_fn
+        )
+        
+        # D. Execute Hybrid Search
+        results = collection.query(
+            query_texts=[resume_text],
+            n_results=top_k,
+            where={"role": target_role} # 👈 The "Hybrid" Filter
+        )
+        
+        # E. Process Results
+        hybrid_skills = []
+        if results['ids'] and results['ids'][0]:
+            for i in range(len(results['ids'][0])):
+                meta = results['metadatas'][0][i]
+                doc = results['documents'][0][i]
+                score = results['distances'][0][i]
+                
+                hybrid_skills.append({
+                    "skill": meta['title'],
+                    "code": meta['code'],
+                    "level": meta['level'],
+                    "required_knowledge": doc, 
+                    "relevance_score": score
+                })
+        
+        if not hybrid_skills:
+            logger.warning(f"⚠️ Vector search found 0 matches. Falling back to SQL.")
+            return get_match_skills_data(target_role)
+
+        return hybrid_skills
+
+    except Exception as e:
+        logger.error(f"❌ Hybrid Search Failed: {e}")
+        logger.info("🪂 Falling back to Standard SQL Search")
+        return get_match_skills_data(target_role)
