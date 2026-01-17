@@ -13,5 +13,3 @@ pandas
 google-api-core
 pydantic
 openpyxl
-sentence-transformers 
-numpy
