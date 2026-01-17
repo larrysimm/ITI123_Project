@@ -34,7 +34,6 @@ async def startup_event():
 
     initialize.init_db()
     logger.info("... Checking Vector Database ...")
-    initialize.sync_vector_db()
     ai_service.init_ai_models()
     ai_service.load_prompts()
     ai_service.load_star_guide()
