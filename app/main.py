@@ -1,5 +1,7 @@
 import json
 import logging
+import gc
+import asyncio
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
@@ -28,16 +30,41 @@ app.include_router(interview.router, prefix="/api/interview", tags=["Interview"]
 app.include_router(skills.router, prefix="/api/skills", tags=["Skills"])
 app.include_router(audio.router, prefix="/api/audio", tags=["Audio"])
 
+async def run_heavy_initialization():
+    """
+    Runs the heavy data loading in the background so the server doesn't timeout.
+    """
+    logger.info("⏳ [Background] Starting Data Ingestion...")
+    
+    # 1. Download & Process Excel (High RAM spike)
+    try:
+        initialize.fetch_excel_data()
+        gc.collect() # Force RAM cleanup
+        
+        initialize.fetch_star_guide()
+        initialize.fetch_questions()
+        
+        # 2. Generate Embeddings (High RAM spike)
+        # This will take time, but the server is already running!
+        initialize.generate_local_embeddings()
+        gc.collect()
+        
+        logger.info("✅ [Background] All Data Ready & Embeddings Generated!")
+        
+    except Exception as e:
+        logger.error(f"❌ [Background] Ingestion Failed: {e}")
+
 @app.on_event("startup")
 async def startup_event():
     logger.info(">>> SERVER STARTING UP <<<")
 
     initialize.init_db()
-    logger.info("... Checking Vector Database ...")
+
     ai_service.init_ai_models()
     ai_service.load_prompts()
-    ai_service.load_star_guide()
 
+    asyncio.create_task(run_heavy_initialization())
+    
     logger.info("Server is ready to accept requests.")
 
 @app.on_event("shutdown")

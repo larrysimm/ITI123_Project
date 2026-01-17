@@ -185,33 +185,34 @@ def fetch_excel_data():
 def generate_local_embeddings():
     """
     Generates embeddings locally. 
-    Lazy loads the AI model so it doesn't crash the server during Excel processing.
+    Loads model -> Processes -> Deletes model to save RAM.
     """
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
-    # Check if we actually need to run this
+    # Check work
     cursor.execute("SELECT COUNT(*) FROM skill_definitions WHERE embedding IS NULL")
     remaining = cursor.fetchone()[0]
     
     if remaining == 0:
-        logger.info("✅ All embeddings up to date. Skipping AI load.")
+        logger.info("✅ All embeddings up to date.")
         conn.close()
         return
 
     logger.info(f"🧠 Loading AI Model to generate {remaining} vectors...")
 
-    # --- LAZY IMPORT (Saves RAM until this exact moment) ---
+    # --- LAZY IMPORT ---
     from sentence_transformers import SentenceTransformer
     import numpy as np
     
-    # Load Model (Uses ~100MB RAM)
+    # 1. Load Model (Uses ~200MB RAM)
     model = SentenceTransformer('all-MiniLM-L6-v2')
     
-    # Fetch Data in Batches to avoid OOM
-    BATCH_SIZE = 100
+    # 2. Process in very small batches to keep RAM stable
+    BATCH_SIZE = 50 
     cursor.execute("SELECT skill_code, title, description FROM skill_definitions WHERE embedding IS NULL")
     
+    processed_count = 0
     while True:
         rows = cursor.fetchmany(BATCH_SIZE)
         if not rows:
@@ -231,10 +232,17 @@ def generate_local_embeddings():
             
         cursor.executemany("UPDATE skill_definitions SET embedding = ? WHERE skill_code = ?", update_data)
         conn.commit()
-        logger.info(f"   -> Processed batch of {len(rows)}...")
+        
+        processed_count += len(rows)
+        if processed_count % 100 == 0:
+            logger.info(f"   -> Processed {processed_count} items...")
 
     conn.close()
-    logger.info("✅ Local Embeddings generation complete!")
+    
+    # 3. CRITICAL: DESTROY MODEL TO FREE RAM
+    del model
+    gc.collect()
+    logger.info("✅ Local Embeddings complete. RAM cleared.")
 
 def fetch_star_guide():
     """Downloads the STAR guide PDF."""
