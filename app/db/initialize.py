@@ -4,6 +4,8 @@ import os
 import json
 import requests
 import logging
+import numpy as np
+from sentence_transformers import SentenceTransformer
 from app.core.config import settings
 
 # --- LOGGER SETUP ---
@@ -68,6 +70,13 @@ def init_db():
         CREATE TABLE IF NOT EXISTS saved_questions (
             id INTEGER PRIMARY KEY AUTOINCREMENT, question_text TEXT UNIQUE
         );
+        CREATE TABLE IF NOT EXISTS skill_definitions (
+            skill_code TEXT PRIMARY KEY,
+            title TEXT,
+            description TEXT,
+            category TEXT,
+            embedding BLOB
+        )
     """)
     
     try:
@@ -214,6 +223,51 @@ def log_table_counts():
         
     except Exception as e:
         logger.error(f"❌ Failed to fetch database stats: {e}")
+
+def generate_local_embeddings():
+    """
+    Generates embeddings locally using CPU and saves them as BLOBs.
+    No API Key required.
+    """
+    logger.info("🧠 Loading local embedding model (all-MiniLM-L6-v2)...")
+    # This downloads the model once (~80MB) and runs locally
+    model = SentenceTransformer('all-MiniLM-L6-v2')
+    
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    # 1. Get skills that don't have embeddings yet
+    cursor.execute("SELECT skill_code, title, description FROM skill_definitions WHERE embedding IS NULL")
+    rows = cursor.fetchall()
+    
+    if not rows:
+        logger.info("✅ All skills already have embeddings. Skipping.")
+        conn.close()
+        return
+
+    logger.info(f"   -> Generating vectors for {len(rows)} skills...")
+
+    # 2. Prepare Data
+    codes = [r[0] for r in rows]
+    # Combine title + description for better semantic search
+    texts = [f"{r[1]}: {r[2]}" for r in rows]
+    
+    # 3. Generate Vectors (Batch processing is faster)
+    # normalize_embeddings=True allows us to use Dot Product for Cosine Similarity
+    embeddings = model.encode(texts, batch_size=64, show_progress_bar=True, normalize_embeddings=True)
+    
+    # 4. Save to SQLite as BLOBs
+    update_data = []
+    for code, emb in zip(codes, embeddings):
+        # Convert numpy array to binary bytes
+        emb_blob = emb.astype(np.float32).tobytes()
+        update_data.append((emb_blob, code))
+        
+    cursor.executemany("UPDATE skill_definitions SET embedding = ? WHERE skill_code = ?", update_data)
+    
+    conn.commit()
+    conn.close()
+    logger.info("✅ Local Embeddings generation complete!")
 
 if __name__ == "__main__":
     init_db()
