@@ -229,6 +229,12 @@ async def run_chain_with_fallback(prompt_template, inputs, step_name="AI"):
         # Stop Timer
         duration = time.time() - start_time
 
+        if content:
+            # Remove ```json at start and ``` at end
+            content = re.sub(r"^```(?:json)?\s*", "", content, flags=re.MULTILINE | re.IGNORECASE)
+            content = re.sub(r"\s*```$", "", content, flags=re.MULTILINE)
+            content = content.strip()
+
         # --- 3. LOG OUTPUT (First 50 words) ---
         content = response.content
         if content:
