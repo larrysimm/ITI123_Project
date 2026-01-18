@@ -186,7 +186,7 @@ import sqlite3
 from ..core.config import settings, logger  # Ensure these are imported
 
 def log_table_counts():
-    """Helper to print row counts for every table in the DB."""
+    """Helper to print row counts and top 5 rows for every table."""
     try:
         # Create a temporary connection just for checking stats
         conn = sqlite3.connect(settings.DB_PATH)
@@ -196,24 +196,43 @@ def log_table_counts():
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
         tables = cursor.fetchall()
         
-        logger.info("📊 --- DATABASE STATISTICS ---")
+        logger.info("📊 --- DATABASE STATISTICS & PREVIEW ---")
         
         if not tables:
             logger.warning("   ⚠️ No tables found in the database!")
         
-        # 2. Loop through and count rows
+        # 2. Loop through each table
         for table in tables:
             table_name = table[0]
+            
+            # A. Get Count
             cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
             count = cursor.fetchone()[0]
-            # Print with nice formatting
-            logger.info(f"   🔹 {table_name:<25}: {count} records")
+            logger.info(f"   🔹 TABLE: {table_name} ({count} records)")
             
-        logger.info("-----------------------------")
+            # B. Get Top 5 Rows (if data exists)
+            if count > 0:
+                cursor.execute(f"SELECT * FROM {table_name} LIMIT 5")
+                rows = cursor.fetchall()
+                
+                # Get column names to make the log readable
+                headers = [description[0] for description in cursor.description]
+                logger.info(f"      📝 Columns: {headers}")
+                
+                for i, row in enumerate(rows):
+                    # Convert tuple to list for cleaner printing
+                    logger.info(f"      Row {i+1}: {list(row)}")
+                
+                logger.info("      " + "-"*50) # Separator line
+            else:
+                logger.info("      (Table is empty)")
+                logger.info("      " + "-"*50)
+
+        logger.info("----------------------------------------")
         conn.close()
         
     except Exception as e:
-        logger.error(f"❌ Failed to fetch database stats: {e}")
+        logger.error(f"❌ Error logging table stats: {e}")
 
 if __name__ == "__main__":
     init_db()
