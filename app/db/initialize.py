@@ -5,6 +5,7 @@ import json
 import requests
 import logging
 from app.core.config import settings
+from pinecone import Pinecone
 
 # --- LOGGER SETUP ---
 logging.basicConfig(
@@ -234,5 +235,32 @@ def log_table_counts():
     except Exception as e:
         logger.error(f"❌ Error logging table stats: {e}")
 
+def verify_pinecone_connection():
+    """
+    Checks if the backend can connect to the existing Pinecone Index.
+    Does NOT upload data. Just validates the connection.
+    """
+    if not settings.PINECONE_API_KEY or not settings.PINECONE_INDEX_NAME:
+        logger.warning("⚠️ Pinecone keys not found in settings. Running in SQL-only mode.")
+        return
+
+    try:
+        # Initialize Client
+        pc = Pinecone(api_key=settings.PINECONE_API_KEY)
+        index = pc.Index(settings.PINECONE_INDEX_NAME)
+        
+        # Check Stats
+        stats = index.describe_index_stats()
+        count = stats.total_vector_count
+        
+        if count > 0:
+            logger.info(f"✅ Pinecone Connected Successfully! Index contains {count} vectors.")
+        else:
+            logger.warning("⚠️ Pinecone Connected, but the index is EMPTY. Semantic search will not work.")
+
+    except Exception as e:
+        logger.error(f"❌ Pinecone Connection Failed: {e}")
+
 if __name__ == "__main__":
     init_db()
+    verify_pinecone_connection()
