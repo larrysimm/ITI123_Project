@@ -32,6 +32,7 @@ async def startup_event():
     logger.info(">>> SERVER STARTING UP <<<")
 
     initialize.init_db()
+    initialize.verify_pinecone_connection()
     ai_service.init_ai_models()
     ai_service.load_prompts()
     ai_service.load_star_guide()
