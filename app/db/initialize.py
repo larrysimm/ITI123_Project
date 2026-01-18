@@ -6,6 +6,7 @@ import requests
 import logging
 from app.core.config import settings
 from pinecone import Pinecone
+from app.services.ai_service import mask_key
 
 # --- LOGGER SETUP ---
 logging.basicConfig(
@@ -240,9 +241,13 @@ def verify_pinecone_connection():
     Checks if the backend can connect to the existing Pinecone Index.
     Does NOT upload data. Just validates the connection.
     """
+    if settings.PINECONE_API_KEY:
+        logger.info(f"✅ Pinecone API: {mask_key(settings.PINECONE_API_KEY)}")
+        
     if not settings.PINECONE_API_KEY or not settings.PINECONE_INDEX_NAME:
         logger.warning("⚠️ Pinecone keys not found in settings. Running in SQL-only mode.")
         return
+    
 
     try:
         # Initialize Client
@@ -263,3 +268,4 @@ def verify_pinecone_connection():
 
 if __name__ == "__main__":
     init_db()
+    verify_pinecone_connection()
