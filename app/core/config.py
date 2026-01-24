@@ -13,18 +13,27 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 
 # 3. Setup Logging (Centralized)
 def setup_logging():
-    # Create the Master Logger
+    # 1. Get the Custom Logger
     logger = logging.getLogger("PolyToPro")
+    
+    # --- FIX 1: Prevent "The Echo" (Propagation) ---
+    # This stops the log from bubbling up to the Root/Uvicorn logger
+    logger.propagate = False 
+
+    # --- FIX 2: Prevent Duplicate Handlers on Reload ---
+    # If handlers already exist (e.g., from a previous hot-reload), clear them.
+    if logger.hasHandlers():
+        logger.handlers.clear()
+
     logger.setLevel(logging.INFO)
 
-    # A. Always log to Console (Terminal / Render System Logs)
+    # 2. Add Console Handler (So you see it in Render Logs)
     stream_handler = logging.StreamHandler()
     formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
     stream_handler.setFormatter(formatter)
     logger.addHandler(stream_handler)
 
-    # B. Add Better Stack (Logtail) ONLY if Token exists
-    # This prevents crashes if you forget the token locally
+    # 3. Add Better Stack (Logtail) - ONLY if Token exists
     logtail_token = os.getenv("LOGTAIL_SOURCE_TOKEN")
     
     if logtail_token:
@@ -33,14 +42,15 @@ def setup_logging():
             logger.addHandler(handler)
             logger.info("✅ Better Stack Cloud Logging ENABLED")
         except Exception as e:
-            logger.error(f"❌ Failed to connect to Better Stack: {e}")
+            # Fallback: Print error to console so you know why it failed
+            stream_handler.createLock()
+            print(f"❌ Failed to connect to Better Stack: {e}")
+            stream_handler.releaseLock()
     else:
+        # Only warn if we are NOT in a local dev environment (optional check)
         logger.warning("⚠️ No LOGTAIL_SOURCE_TOKEN found. Logging to console only.")
 
     return logger
-
-# Initialize immediately so other files can import 'logger'
-logger = setup_logging()
 
 class Settings:
     PROJECT_NAME = "Poly-to-Pro"
