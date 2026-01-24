@@ -49,6 +49,8 @@ def setup_logging():
 
     return logger
 
+logger = setup_logging()
+
 class Settings:
     PROJECT_NAME = "Poly-to-Pro"
     VERSION = "3.0.0"

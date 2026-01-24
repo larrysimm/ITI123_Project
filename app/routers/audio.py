@@ -1,5 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from ..services import ai_service
+from app.services import ai_service
 import logging
 
 router = APIRouter()

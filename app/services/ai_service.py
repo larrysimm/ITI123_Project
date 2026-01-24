@@ -11,8 +11,8 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from openai import AsyncOpenAI
 
-from ..core.config import settings, logger
-from ..utils import parsers
+from app.core.config import settings, logger
+from app.utils import parsers
 
 # --- GLOBAL STATE ---
 STAR_GUIDE_TEXT = "Standard STAR Method principles."
@@ -365,3 +365,18 @@ async def transcribe_audio_with_fallback(file_obj):
     # If we exit the loop, everything failed
     logger.error("❌ All transcription services failed.")
     return "Error: Could not transcribe audio. Please type your answer."
+
+def clean_json_string(text: str) -> str:
+    """
+    Removes Markdown code blocks (```json ... ```) from LLM responses 
+    so strict JSON parsers don't fail.
+    """
+    if not text:
+        return ""
+        
+    # Remove ```json or ``` at the start
+    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.MULTILINE | re.IGNORECASE)
+    # Remove ``` at the end
+    text = re.sub(r"\s*```$", "", text, flags=re.MULTILINE)
+    
+    return text.strip()

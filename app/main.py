@@ -5,10 +5,10 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .db import initialize 
-from .core.config import settings, logger
-from .services import ai_service
-from .routers import interview, skills, audio
+from app.db import initialize 
+from app.core.config import settings, logger
+from app.services import ai_service
+from app.routers import interview, skills, audio
 
 logger = logging.getLogger(__name__)
 

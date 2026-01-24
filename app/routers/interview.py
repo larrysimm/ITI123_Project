@@ -5,10 +5,10 @@ import asyncio
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
-from ..schemas import AnalyzeRequest 
-from ..services import ai_service
-from ..db import database
-from ..utils import parsers
+from app.schemas import AnalyzeRequest 
+from app.services import ai_service
+from app.db import database
+from app.utils import parsers
 
 router = APIRouter()
 logger = logging.getLogger(__name__)

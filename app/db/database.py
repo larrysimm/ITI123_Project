@@ -2,7 +2,7 @@
 import sqlite3
 import logging
 import os
-from ..core.config import settings
+from app.core.config import settings
 
 # --- LOGGER SETUP ---
 logger = logging.getLogger(__name__)

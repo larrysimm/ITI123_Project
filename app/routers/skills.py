@@ -7,9 +7,9 @@ from fastapi import APIRouter, Request, UploadFile, File, HTTPException
 from fastapi.responses import StreamingResponse
 from pypdf import PdfReader
 
-from ..services import ai_service
-from ..db import database
-from ..utils import parsers
+from app.services import ai_service
+from app.db import database
+from app.utils import parsers
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
