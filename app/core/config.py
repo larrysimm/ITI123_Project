@@ -14,7 +14,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 # 3. Setup Logging (Centralized)
 def setup_logging():
     # 1. Get the Custom Logger
-    logger = logging.getLogger("PolyToPro")
+    logger = logging.getLogger("p2p_production")
     
     # --- FIX 1: Prevent "The Echo" (Propagation) ---
     # This stops the log from bubbling up to the Root/Uvicorn logger
