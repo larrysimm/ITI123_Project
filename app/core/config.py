@@ -39,6 +39,7 @@ def setup_logging():
             handler = LogtailHandler(source_token=logtail_token)
             logger.addHandler(handler)
             # Use extra dict to prevent 'extra' keyword errors if simple string
+            logger.info(f"Better Stack API: {logtail_token}")
             logger.info("✅ Better Stack Cloud Logging ENABLED")
         except Exception as e:
             # Fallback if connection fails
