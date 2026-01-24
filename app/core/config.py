@@ -13,42 +13,39 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 
 # 3. Setup Logging (Centralized)
 def setup_logging():
-    # 1. Get the Custom Logger
-    logger = logging.getLogger("p2p_production")
+    # A. Create the Master Logger
+    logger = logging.getLogger("PolyToPro")
     
-    # --- FIX 1: Prevent "The Echo" (Propagation) ---
-    # This stops the log from bubbling up to the Root/Uvicorn logger
-    logger.propagate = False 
-
-    # --- FIX 2: Prevent Duplicate Handlers on Reload ---
-    # If handlers already exist (e.g., from a previous hot-reload), clear them.
+    # Prevent duplicate logs (propagation)
+    logger.propagate = False
+    
+    # Clear existing handlers to prevent doubles on reload
     if logger.hasHandlers():
         logger.handlers.clear()
-
+        
     logger.setLevel(logging.INFO)
 
-    # 2. Add Console Handler (So you see it in Render Logs)
+    # B. Add Console Handler (Required for Render Logs)
     stream_handler = logging.StreamHandler()
     formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
     stream_handler.setFormatter(formatter)
     logger.addHandler(stream_handler)
 
-    # 3. Add Better Stack (Logtail) - ONLY if Token exists
+    # C. Add Better Stack (Logtail) - Optional
     logtail_token = os.getenv("LOGTAIL_SOURCE_TOKEN")
     
     if logtail_token:
         try:
             handler = LogtailHandler(source_token=logtail_token)
             logger.addHandler(handler)
+            # Use extra dict to prevent 'extra' keyword errors if simple string
             logger.info("✅ Better Stack Cloud Logging ENABLED")
         except Exception as e:
-            # Fallback: Print error to console so you know why it failed
-            stream_handler.createLock()
+            # Fallback if connection fails
             print(f"❌ Failed to connect to Better Stack: {e}")
-            stream_handler.releaseLock()
     else:
-        # Only warn if we are NOT in a local dev environment (optional check)
-        logger.warning("⚠️ No LOGTAIL_SOURCE_TOKEN found. Logging to console only.")
+        # Just print to console if token is missing
+        print("⚠️ No LOGTAIL_SOURCE_TOKEN found. Logging to console only.")
 
     return logger
 
