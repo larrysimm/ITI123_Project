@@ -1,6 +1,7 @@
 import os
 import logging
 from dotenv import load_dotenv
+from logtail import LogtailHandler
 
 # 1. Load the .env file
 load_dotenv()
@@ -11,15 +12,35 @@ load_dotenv()
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 3. Setup Logging (Centralized)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler("backend.log"),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger("PolyToPro")
+def setup_logging():
+    # Create the Master Logger
+    logger = logging.getLogger("PolyToPro")
+    logger.setLevel(logging.INFO)
+
+    # A. Always log to Console (Terminal / Render System Logs)
+    stream_handler = logging.StreamHandler()
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(stream_handler)
+
+    # B. Add Better Stack (Logtail) ONLY if Token exists
+    # This prevents crashes if you forget the token locally
+    logtail_token = os.getenv("LOGTAIL_SOURCE_TOKEN")
+    
+    if logtail_token:
+        try:
+            handler = LogtailHandler(source_token=logtail_token)
+            logger.addHandler(handler)
+            logger.info("✅ Better Stack Cloud Logging ENABLED")
+        except Exception as e:
+            logger.error(f"❌ Failed to connect to Better Stack: {e}")
+    else:
+        logger.warning("⚠️ No LOGTAIL_SOURCE_TOKEN found. Logging to console only.")
+
+    return logger
+
+# Initialize immediately so other files can import 'logger'
+logger = setup_logging()
 
 class Settings:
     PROJECT_NAME = "Poly-to-Pro"

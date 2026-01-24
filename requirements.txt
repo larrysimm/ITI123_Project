@@ -14,3 +14,4 @@ google-api-core
 pydantic
 openpyxl
 pinecone
+logtail-python==0.2.0
