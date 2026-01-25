@@ -220,8 +220,18 @@ async def run_chain_with_fallback(prompt_template, inputs, step_name="AI"):
     # Flatten inputs to a string to scan for attacks
     scan_text = str(inputs)
 
+    is_jailbreak, guard_usage = GuardrailService.detect_jailbreak(scan_text)
+
+    if guard_usage:
+        logger.info(
+            f"💰 TOKEN USAGE (Guardrail): "
+            f"In={guard_usage['input_tokens']}, "
+            f"Out={guard_usage['output_tokens']}, "
+            f"Total={guard_usage['total_tokens']}"
+        )
+
     # 1. JAILBREAK CHECK (Adversarial Defense)
-    if GuardrailService.detect_jailbreak(scan_text):
+    if is_jailbreak:
         logger.warning(f"🛡️ SECURITY: Jailbreak attempt blocked in {step_name}")
         return "I cannot process this request. I am programmed to be a helpful Interview Coach and cannot ignore my instructions."
 
