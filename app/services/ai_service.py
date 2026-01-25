@@ -231,7 +231,7 @@ async def run_chain_with_fallback(prompt_template, inputs, step_name="AI"):
         return "I cannot process this request as it contains content that violates our safety guidelines."
 
     # =========================================================
-    
+
     # Helper to run and log tokens
     async def execute_and_log(chain, model_name):
         # --- 1. LOG INPUT (First 50 words) ---
@@ -388,15 +388,40 @@ async def transcribe_audio_with_fallback(file_obj):
 
 def clean_json_string(text: str) -> str:
     """
-    Removes Markdown code blocks (```json ... ```) from LLM responses 
-    so strict JSON parsers don't fail.
+    Robust JSON Extractor:
+    1. Removes Markdown code blocks.
+    2. Uses Regex to find the first '{' and last '}' to isolate the JSON.
+    3. Handles Guardrail refusals gracefully.
     """
     if not text:
-        return ""
-        
-    # Remove ```json or ``` at the start
-    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.MULTILINE | re.IGNORECASE)
-    # Remove ``` at the end
-    text = re.sub(r"\s*```$", "", text, flags=re.MULTILINE)
-    
-    return text.strip()
+        return "{}"
+
+    # --- 1. Handle Guardrail Refusals ---
+    # If the text is a plain sentence (doesn't look like JSON), return a dummy JSON error
+    # This prevents the "Could not parse" crash in the UI.
+    if "I cannot process" in text or "violated our safety" in text:
+        logger.warning(f"⚠️ Parser detected Guardrail Refusal: {text}")
+        # Return a structure that matches what your UI expects (adjust keys if needed)
+        return json.dumps({
+            "feedback": text,
+            "score": 0,
+            "critique": "Request blocked by safety guardrails."
+        })
+
+    # --- 2. Remove Markdown (Existing logic) ---
+    text = re.sub(r"^```(?:json)?", "", text, flags=re.MULTILINE)
+    text = re.sub(r"```$", "", text, flags=re.MULTILINE)
+
+    # --- 3. Regex Search for JSON Object ---
+    # This looks for the content between the first { and the last }
+    try:
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            return match.group(0)
+        else:
+            # If no JSON found, log it and return empty
+            logger.warning(f"⚠️ No JSON object found in response: {text[:50]}...")
+            return "{}"
+    except Exception as e:
+        logger.error(f"❌ Regex Parsing Failed: {e}")
+        return "{}"
