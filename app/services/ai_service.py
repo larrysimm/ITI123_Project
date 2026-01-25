@@ -390,29 +390,38 @@ def parse_json_safely(text: str) -> dict:
     """
     Robust JSON Parser that:
     1. Ignores conversational text ("Here is the JSON...").
-    2. Ignores 'Thinking' logs or Markdown.
-    3. Returns a valid fallback dictionary if parsing fails (no crashes).
+    2. Handles Guardrail Refusals cleanly (No scary warnings).
+    3. Returns a valid fallback dictionary if parsing fails.
     """
     if not text:
         return {"feedback": "No content generated.", "score": 0}
 
-    # --- 1. Try to find JSON content using Regex ---
-    # Matches everything between the first '{' and the last '}'
+    # --- 1. Check for Guardrail Refusal (Success Case) ---
+    # If the text is exactly the guardrail message, handle it gracefully.
+    if "I cannot process this request" in text or "violates our safety" in text:
+        logger.info(f"🛡️ Guardrail Refusal Handled: {text[:50]}...")
+        return {
+            "feedback": "Request Blocked",
+            "critique": "Your input was flagged by our safety guidelines. Please try again with professional language.",
+            "score": 0,
+            "improvements": ["Please rephrase your request."]
+        }
+
+    # --- 2. Try to find JSON content using Regex ---
     try:
         match = re.search(r"\{.*\}", text, re.DOTALL)
         if match:
             json_str = match.group(0)
             return json.loads(json_str)
     except Exception:
-        # If regex finds something but it's invalid JSON, ignore and fall through
         pass
 
-    # --- 2. If we are here, parsing FAILED. Return Safety JSON. ---
+    # --- 3. Parsing TRULY Failed (Error Case) ---
     logger.warning(f"⚠️ JSON Parsing Failed. Raw text: {text[:50]}...")
     
     return {
-        "feedback": "The AI response format was invalid, but here is the raw content.",
-        "critique": text[:500] if text else "No content", 
+        "feedback": "System Error: Invalid AI Response",
+        "critique": text[:500], # Return raw text so user sees something
         "score": 0,
         "improvements": ["System: Please try again."]
     }
