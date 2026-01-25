@@ -404,15 +404,15 @@ def parse_json_safely(text: str) -> dict:
     3. Returns a valid fallback dictionary if parsing fails.
     """
     if not text:
-        return {"feedback": "No content generated.", "score": 0}
+        return {"coach_critique": "No content generated.", "score": 0}
 
     # --- 1. Check for Guardrail Refusal (Success Case) ---
     # If the text is exactly the guardrail message, handle it gracefully.
     if "I cannot process this request" in text or "violates our safety" in text:
         logger.info(f"🛡️ Guardrail Refusal Handled: {text[:50]}...")
         return {
-            "feedback": "Request Blocked",
-            "critique": "Your input was flagged by our safety guidelines. Please try again with professional language.",
+            "coach_critique": "🚫 REQUEST BLOCKED: Your input was flagged by our safety guidelines.",
+            "rewritten_answer": "Your input was flagged by our safety guidelines. Please try again with professional language.",
             "score": 0,
             "improvements": ["Please rephrase your request."]
         }
@@ -430,8 +430,8 @@ def parse_json_safely(text: str) -> dict:
     logger.warning(f"⚠️ JSON Parsing Failed. Raw text: {text[:50]}...")
     
     return {
-        "feedback": "System Error: Invalid AI Response",
-        "critique": text[:500], # Return raw text so user sees something
+        "coach_critique": "System Error: Invalid AI Response",
+        "rewritten_answer": text[:500], # Return raw text so user sees something
         "score": 0,
         "improvements": ["System: Please try again."]
     }
