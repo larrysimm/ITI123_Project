@@ -36,7 +36,9 @@ def setup_logging():
     
     if logtail_token:
         try:
-            handler = LogtailHandler(source_token=logtail_token)
+            handler = LogtailHandler(
+                source_token=logtail_token,
+                host="s1693478.eu-nbg-2.betterstackdata.com")
             logger.addHandler(handler)
             # Use extra dict to prevent 'extra' keyword errors if simple string
             logger.info(f"Better Stack API: {logtail_token}")
