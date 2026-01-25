@@ -388,40 +388,40 @@ async def transcribe_audio_with_fallback(file_obj):
 
 def clean_json_string(text: str) -> str:
     """
-    Robust JSON Extractor:
-    1. Removes Markdown code blocks.
-    2. Uses Regex to find the first '{' and last '}' to isolate the JSON.
-    3. Handles Guardrail refusals gracefully.
+    Universal JSON Extractor.
+    1. Scans text for the first '{' and last '}' to isolate JSON (ignoring conversational fluff).
+    2. Validates if the extracted bit is real JSON.
+    3. If no JSON is found (e.g., Guardrail refusal), constructs a valid JSON error object.
     """
     if not text:
         return "{}"
 
-    # --- 1. Handle Guardrail Refusals ---
-    # If the text is a plain sentence (doesn't look like JSON), return a dummy JSON error
-    # This prevents the "Could not parse" crash in the UI.
-    if "I cannot process" in text or "violated our safety" in text:
-        logger.warning(f"⚠️ Parser detected Guardrail Refusal: {text}")
-        # Return a structure that matches what your UI expects (adjust keys if needed)
-        return json.dumps({
-            "feedback": text,
-            "score": 0,
-            "critique": "Request blocked by safety guardrails."
-        })
-
-    # --- 2. Remove Markdown (Existing logic) ---
-    text = re.sub(r"^```(?:json)?", "", text, flags=re.MULTILINE)
-    text = re.sub(r"```$", "", text, flags=re.MULTILINE)
-
-    # --- 3. Regex Search for JSON Object ---
-    # This looks for the content between the first { and the last }
+    # --- STRATEGY 1: SURGICAL EXTRACTION (The "Happy Path") ---
+    # Use Regex to find the content between the first '{' and the last '}'
+    # re.DOTALL makes '.' match newlines, so it captures multi-line JSON.
     try:
         match = re.search(r"\{.*\}", text, re.DOTALL)
         if match:
-            return match.group(0)
-        else:
-            # If no JSON found, log it and return empty
-            logger.warning(f"⚠️ No JSON object found in response: {text[:50]}...")
-            return "{}"
-    except Exception as e:
-        logger.error(f"❌ Regex Parsing Failed: {e}")
-        return "{}"
+            candidate = match.group(0)
+            # Validation: Try to parse it to ensure it's not broken
+            json.loads(candidate)
+            return candidate
+    except Exception:
+        # If extraction worked but validation failed (e.g. broken JSON), fall through.
+        pass
+
+    # --- STRATEGY 2: GUARDRAIL / ERROR FALLBACK (The "Safety Path") ---
+    # If we reached here, there is NO valid JSON in the text.
+    # We must return a dummy JSON object so the UI does not crash.
+    
+    logger.warning(f"⚠️ parsing failed or content blocked. Raw Text: {text[:50]}...")
+
+    # Check if it was a specific safety refusal
+    is_refusal = "cannot process" in text or "safety" in text or "programmed" in text
+
+    return json.dumps({
+        "feedback": "Response blocked or invalid.",
+        "critique": text if is_refusal else "The AI response could not be parsed.",
+        "score": 0,
+        "improvements": ["Please try rephrasing your answer."]
+    })
