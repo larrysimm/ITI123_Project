@@ -191,7 +191,7 @@ async def validate_is_resume(text: str):
         )
         
         # 4. Parse the JSON result
-        result = parsers.extract_clean_json(response_text)
+        result = parse_json_safely(response_text)
         
         # Fail-safe: If JSON parsing fails, assume it's valid to avoid blocking user
         if not result:
@@ -386,42 +386,33 @@ async def transcribe_audio_with_fallback(file_obj):
     logger.error("❌ All transcription services failed.")
     return "Error: Could not transcribe audio. Please type your answer."
 
-def clean_json_string(text: str) -> str:
+def parse_json_safely(text: str) -> dict:
     """
-    Universal JSON Extractor.
-    1. Scans text for the first '{' and last '}' to isolate JSON (ignoring conversational fluff).
-    2. Validates if the extracted bit is real JSON.
-    3. If no JSON is found (e.g., Guardrail refusal), constructs a valid JSON error object.
+    Robust JSON Parser that:
+    1. Ignores conversational text ("Here is the JSON...").
+    2. Ignores 'Thinking' logs or Markdown.
+    3. Returns a valid fallback dictionary if parsing fails (no crashes).
     """
     if not text:
-        return "{}"
+        return {"feedback": "No content generated.", "score": 0}
 
-    # --- STRATEGY 1: SURGICAL EXTRACTION (The "Happy Path") ---
-    # Use Regex to find the content between the first '{' and the last '}'
-    # re.DOTALL makes '.' match newlines, so it captures multi-line JSON.
+    # --- 1. Try to find JSON content using Regex ---
+    # Matches everything between the first '{' and the last '}'
     try:
         match = re.search(r"\{.*\}", text, re.DOTALL)
         if match:
-            candidate = match.group(0)
-            # Validation: Try to parse it to ensure it's not broken
-            json.loads(candidate)
-            return candidate
+            json_str = match.group(0)
+            return json.loads(json_str)
     except Exception:
-        # If extraction worked but validation failed (e.g. broken JSON), fall through.
+        # If regex finds something but it's invalid JSON, ignore and fall through
         pass
 
-    # --- STRATEGY 2: GUARDRAIL / ERROR FALLBACK (The "Safety Path") ---
-    # If we reached here, there is NO valid JSON in the text.
-    # We must return a dummy JSON object so the UI does not crash.
+    # --- 2. If we are here, parsing FAILED. Return Safety JSON. ---
+    logger.warning(f"⚠️ JSON Parsing Failed. Raw text: {text[:50]}...")
     
-    logger.warning(f"⚠️ parsing failed or content blocked. Raw Text: {text[:50]}...")
-
-    # Check if it was a specific safety refusal
-    is_refusal = "cannot process" in text or "safety" in text or "programmed" in text
-
-    return json.dumps({
-        "feedback": "Response blocked or invalid.",
-        "critique": text if is_refusal else "The AI response could not be parsed.",
+    return {
+        "feedback": "The AI response format was invalid, but here is the raw content.",
+        "critique": text[:500] if text else "No content", 
         "score": 0,
-        "improvements": ["Please try rephrasing your answer."]
-    })
+        "improvements": ["System: Please try again."]
+    }
