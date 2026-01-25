@@ -13,6 +13,7 @@ from openai import AsyncOpenAI
 
 from app.core.config import settings, logger
 from app.utils import parsers
+from app.services.guardrails import GuardrailService
 
 # --- GLOBAL STATE ---
 STAR_GUIDE_TEXT = "Standard STAR Method principles."
@@ -211,7 +212,26 @@ async def run_chain_with_fallback(prompt_template, inputs, step_name="AI"):
     2. Tier 2: Groq (Only if BOTH Tier 1 models fail).
     3. Tier 3: Static Fallback (If ALL AI fails).
     """
+    # =========================================================
+    # 🛡️ PHASE 0: INPUT GUARDRAIL (The "Input Rail")
+    # Blocks attacks immediately. Saves Money & Latency.
+    # =========================================================
+    
+    # Flatten inputs to a string to scan for attacks
+    scan_text = str(inputs)
 
+    # 1. JAILBREAK CHECK (Adversarial Defense)
+    if GuardrailService.detect_jailbreak(scan_text):
+        logger.warning(f"🛡️ SECURITY: Jailbreak attempt blocked in {step_name}")
+        return "I cannot process this request. I am programmed to be a helpful Interview Coach and cannot ignore my instructions."
+
+    # 2. TOXICITY CHECK (Inbound Content Moderation)
+    if GuardrailService.check_toxicity(scan_text, source="Inbound"):
+        logger.warning(f"🚫 SAFETY: Toxic input blocked in {step_name}")
+        return "I cannot process this request as it contains content that violates our safety guidelines."
+
+    # =========================================================
+    
     # Helper to run and log tokens
     async def execute_and_log(chain, model_name):
         # --- 1. LOG INPUT (First 50 words) ---
