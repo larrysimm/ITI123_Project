@@ -179,7 +179,7 @@ async def validate_is_resume(text: str):
     safe_text = parsers.redact_pii(text)
     try:
         # 1. Get the prompt template
-        prompt_template = get_prompt("resume_validator_prompt", "is this a resume?")
+        prompt_template = get_prompt("resume_validator_prompt")
         
         # 2. Prepare inputs (Truncate text to save tokens)
         inputs = {"text_sample": safe_text[:2000]}
