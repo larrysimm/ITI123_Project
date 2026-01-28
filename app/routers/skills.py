@@ -10,6 +10,7 @@ from pypdf import PdfReader
 from app.services import ai_service
 from app.db import database
 from app.utils import parsers
+from app.services.guardrails import GuardrailService
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -46,6 +47,17 @@ async def upload_resume(file: UploadFile = File(...)):
     try:
         text = parsers.extract_text_from_pdf(content)
 
+        is_attack, guard_usage = GuardrailService.detect_jailbreak(text[:2000])
+
+        if is_attack:
+            logger.warning(f"🚨 RESUME ATTACK BLOCKED: {file.filename}")
+            raise HTTPException(status_code=400, detail="Security Alert: File contains suspicious content.")
+        
+        if guard_usage:
+            logger.info(f"💰 RESUME SCAN COST: {guard_usage['total_tokens']} tokens")
+        
+        safe_resume_text = parsers.redact_pii(text)
+
         # --- LOGIC CHECK: Is it a scanned image? ---
         if len(text.strip()) < 50:
             logger.warning(f"⚠️ OCR Required: File {file.filename} contains almost no text.")
@@ -59,7 +71,7 @@ async def upload_resume(file: UploadFile = File(...)):
         logger.info("🤖 Verifying document content with AI...")
         
         # Call the new function in ai_service
-        validation_result = await ai_service.validate_is_resume(text)
+        validation_result = await ai_service.validate_is_resume(safe_resume_text)
         
         if not validation_result.get("isValid", True):
             reason = validation_result.get("reason", "Unknown")
@@ -161,7 +173,7 @@ async def match_skills(request: Request):
                 "message": "Formatting final JSON report..."
             }) + "\n"
             
-            analysis_result = parsers.extract_clean_json(ai_response_str)
+            analysis_result = ai_service.parse_json_safely(ai_response_str)
             
             if not analysis_result:
                 logger.error("Failed to parse JSON from AI response.")
