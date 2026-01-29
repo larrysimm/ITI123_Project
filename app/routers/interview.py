@@ -74,7 +74,7 @@ async def analyze_stream(request: AnalyzeRequest):
 
             # ✅ ROBUST JSON (Prevents Crash)
             # If parsing fails, we default to a safe dictionary, NOT None.
-            coach_data = ai_service.parse_json_safely(coach_json_str)
+            coach_data = parsers.parse_json_safely(coach_json_str)
             if not coach_data:
                 coach_data = {
                     "coach_critique": "Could not parse AI response.",

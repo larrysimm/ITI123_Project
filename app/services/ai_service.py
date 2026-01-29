@@ -192,7 +192,7 @@ async def validate_is_resume(text: str):
         )
         
         # 4. Parse the JSON result
-        result = parse_json_safely(response_text)
+        result = parsers.parse_json_safely(response_text)
         
         # Fail-safe: If JSON parsing fails, assume it's valid to avoid blocking user
         if not result:
@@ -396,43 +396,3 @@ async def transcribe_audio_with_fallback(file_obj):
     # If we exit the loop, everything failed
     logger.error("❌ All transcription services failed.")
     return "Error: Could not transcribe audio. Please type your answer."
-
-def parse_json_safely(text: str) -> dict:
-    """
-    Robust JSON Parser that:
-    1. Ignores conversational text ("Here is the JSON...").
-    2. Handles Guardrail Refusals cleanly (No scary warnings).
-    3. Returns a valid fallback dictionary if parsing fails.
-    """
-    if not text:
-        return {"coach_critique": "No content generated.", "score": 0}
-
-    # --- 1. Check for Guardrail Refusal (Success Case) ---
-    # If the text is exactly the guardrail message, handle it gracefully.
-    if "I cannot process this request" in text or "violates our safety" in text:
-        logger.info(f"🛡️ Guardrail Refusal Handled: {text[:50]}...")
-        return {
-            "coach_critique": "🚫 REQUEST BLOCKED: Your input was flagged by our safety guidelines.",
-            "rewritten_answer": "Your input was flagged by our safety guidelines. Please try again with professional language.",
-            "score": 0,
-            "improvements": ["Please rephrase your request."]
-        }
-
-    # --- 2. Try to find JSON content using Regex ---
-    try:
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if match:
-            json_str = match.group(0)
-            return json.loads(json_str)
-    except Exception:
-        pass
-
-    # --- 3. Parsing TRULY Failed (Error Case) ---
-    logger.warning(f"⚠️ JSON Parsing Failed. Raw text: {text[:50]}...")
-    
-    return {
-        "coach_critique": "System Error: Invalid AI Response",
-        "rewritten_answer": text[:500], # Return raw text so user sees something
-        "score": 0,
-        "improvements": ["System: Please try again."]
-    }

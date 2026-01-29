@@ -1,11 +1,9 @@
 import json
 import logging
 import asyncio
-import io
 
 from fastapi import APIRouter, Request, UploadFile, File, HTTPException
 from fastapi.responses import StreamingResponse
-from pypdf import PdfReader
 
 from app.services import ai_service
 from app.db import database
@@ -161,7 +159,7 @@ async def match_skills(request: Request):
                 "message": "Formatting final JSON report..."
             }) + "\n"
             
-            analysis_result = ai_service.parse_json_safely(ai_response_str)
+            analysis_result = parsers.parse_json_safely(ai_response_str)
             
             if not analysis_result:
                 logger.error("Failed to parse JSON from AI response.")
