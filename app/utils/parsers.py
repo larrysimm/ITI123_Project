@@ -106,7 +106,9 @@ def parse_json_safely(text: str) -> dict:
             "coach_critique": "🚫 REQUEST BLOCKED: Your input was flagged by our safety guidelines.",
             "rewritten_answer": "Your input was flagged by our safety guidelines. Please try again with professional language.",
             "score": 0,
-            "improvements": ["Please rephrase your request."]
+            "improvements": ["Please rephrase your request."],
+            "matched_skills": [],
+            "missing_skills": []
         }
 
     # --- 2. Try to find JSON content using Regex ---

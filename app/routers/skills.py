@@ -2,6 +2,7 @@ import json
 import logging
 import asyncio
 
+from app.services.guardrails import GuardrailService
 from fastapi import APIRouter, Request, UploadFile, File, HTTPException
 from fastapi.responses import StreamingResponse
 
@@ -39,10 +40,23 @@ async def upload_resume(file: UploadFile = File(...)):
     if not content.startswith(b"%PDF"):
         logger.warning(f"⚠️ Security Block: Magic Bytes mismatch for {file.filename}")
         raise HTTPException(status_code=400, detail="Invalid file format. Not a valid PDF.")
-
+    
     # --- PROCESSING: Text Extraction ---
     try:
         text = parsers.extract_text_from_pdf(content)
+
+        # --- SECURITY CHECK 3: Guardrail Jailbreak Detection ---
+        if not text:
+            raise HTTPException(status_code=400, detail="Could not read PDF text.")
+
+        is_attack, guard_usage = GuardrailService.detect_jailbreak(text[:2000])
+
+        if is_attack:
+            logger.warning(f"⛔ Jailbreak Detected in uploaded file: {file.filename}")
+            raise HTTPException(status_code=400, detail="Malicious content detected in file.")
+        
+        if guard_usage:
+            logger.info(f"💰 RESUME SCAN COST: {guard_usage['total_tokens']} tokens")
 
         # --- LOGIC CHECK: Is it a scanned image? ---
         if len(text.strip()) < 50:
@@ -55,9 +69,11 @@ async def upload_resume(file: UploadFile = File(...)):
             }
         
         logger.info("🤖 Verifying document content with AI...")
+
+        safety_text = parsers.redact_pii(text)
         
         # Call the new function in ai_service
-        validation_result = await ai_service.validate_is_resume(text)
+        validation_result = await ai_service.validate_is_resume(safety_text)
         
         if not validation_result.get("isValid", True):
             reason = validation_result.get("reason", "Unknown")
