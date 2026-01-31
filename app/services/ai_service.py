@@ -71,7 +71,7 @@ def init_ai_models():
         try:
             gemini_llm = ChatGoogleGenerativeAI(
                 model="gemini-2.5-flash", 
-                temperature=0.2, 
+                temperature=0, 
                 google_api_key=settings.GOOGLE_API_KEY
             )
             logger.info(f"✅ Gemini Initialized successfully. Google API: {mask_key(settings.GOOGLE_API_KEY)}")
@@ -82,8 +82,11 @@ def init_ai_models():
         try:
             openai_llm = ChatOpenAI(
                 model="gpt-4o-mini", 
-                temperature=0.2, 
-                api_key=settings.OPENAI_API_KEY
+                temperature=0, 
+                api_key=settings.OPENAI_API_KEY,
+                model_kwargs={
+                    "seed": 42 
+                }
             )
             logger.info(f"✅ OpenAI Initialized successfully. OpenAI API: {mask_key(settings.OPENAI_API_KEY)}")
         except Exception as e: logger.error(f"OpenAI Fail: {e}")
@@ -93,8 +96,11 @@ def init_ai_models():
         try:
             groq_llm = ChatGroq(
                 model_name="llama-3.3-70b-versatile", 
-                temperature=0.2, 
-                groq_api_key=settings.GROQ_API_KEY
+                temperature=0, 
+                groq_api_key=settings.GROQ_API_KEY,
+                model_kwargs={
+                    "seed": 42 
+                }
             )
             logger.info(f"✅ Groq Initialized successfully. Groq API: {mask_key(settings.GROQ_API_KEY)}")
         except Exception as e: logger.error(f"Groq Fail: {e}")
