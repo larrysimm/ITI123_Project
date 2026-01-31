@@ -176,12 +176,13 @@ async def validate_is_resume(text: str):
     """
     Uses AI to check if the extracted text looks like a resume.
     """
+    safe_text = parsers.redact_pii(text)
     try:
         # 1. Get the prompt template
         prompt_template = get_prompt("resume_validator_prompt")
         
         # 2. Prepare inputs (Truncate text to save tokens)
-        inputs = {"text_sample": text[:2000]}
+        inputs = {"text_sample": safe_text[:2000]}
         
         # 3. Run with your existing Fallback Engine (Robust!)
         response_text = await run_chain_with_fallback(
