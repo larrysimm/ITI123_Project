@@ -7,15 +7,28 @@ from pypdf import PdfReader
 logger = logging.getLogger(__name__)
 
 def extract_text_from_pdf(file_content: bytes) -> str:
-    """Reads bytes (from upload or file) and returns clean text."""
+    """
+    Reads bytes and returns clean text.
+    Safeguard: Adds newlines to prevent text merging (crucial for Regex).
+    """
     try:
         reader = PdfReader(io.BytesIO(file_content))
-        text = ""
+        text_parts = []
+        
         for page in reader.pages:
-            text += page.extract_text() or ""
-        return text.strip()
+            # extraction_mode="layout" (if using newer pypdf) helps, 
+            # but adding "\n" manually is the safest fallback for all versions.
+            page_text = page.extract_text()
+            if page_text:
+                text_parts.append(page_text)
+        
+        # Join with double newlines to separate sections clearly
+        full_text = "\n\n".join(text_parts)
+        
+        return full_text.strip()
+
     except Exception as e:
-        logger.error(f"PDF Parse Error: {e}")
+        logger.error(f"❌ PDF Parse Error: {e}")
         return ""
 
 def extract_clean_json(text: str) -> dict:
@@ -53,26 +66,86 @@ def redact_pii(text: str) -> str:
     """
     if not text: return ""
 
-    # 1. EMAILS
-    text = re.sub(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '[EMAIL_REDACTED]', text)
-    
-    # 2. PHONE NUMBERS (SG 8-digit & Intl formats)
-    # Matches: 91234567, (+65) 91234567, 65-9123-4567
-    text = re.sub(r'(?:\+?65[- ]?)?[689]\d{3}[- ]?\d{4}\b', '[PHONE_REDACTED]', text)
+    # --- 1. SENSITIVE IDs (Singapore NRIC/FIN) ---
+    # Matches: S1234567A, T1234567Z, F1234567N, G1234567X (Case insensitive)
+    text = re.sub(r'\b[S|T|F|G]\d{7}[A-Z]\b', '[NRIC_REDACTED]', text, flags=re.IGNORECASE)
 
-    # 3. SINGAPORE ADDRESSES (The "Fingerprint")
-    # A. Postal Codes (6 digits, often appearing as "Singapore 123456" or just "123456")
-    text = re.sub(r'\b(?:Singapore\s*)?\d{6}\b', '[POSTAL_CODE]', text)
+    # --- 2. EMAILS & LINKS ---
+    text = re.sub(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '[EMAIL_REDACTED]', text)
+    # Remove LinkedIn/GitHub URLs (which often contain names)
+    link_pattern = r'(?:https?://)?(?:www\.)?(?:linkedin\.com|github\.com)/[\w\-\./]+'
+    text = re.sub(link_pattern, '[LINK_REDACTED]', text, flags=re.IGNORECASE)
+
+    # --- 3. TELEPHONE NUMBERS (Robust Global & SG) ---
     
+    # A. International Format (Starts with + or 00)
+    # Examples: +1-202-555-0123 | +44 (0) 20 1234 5678 | +65 9123 4567
+    # Logic: Look for +, then 1-3 digit country code, then groupings of digits/spaces/dashes
+    intl_phone_pattern = r'(?:\+|00)\d{1,3}[-. ]?\(?\d{1,4}\)?[-. ]?\d{3,}[-. ]?\d{3,}'
+    text = re.sub(intl_phone_pattern, '[PHONE_REDACTED]', text)
+
+    # B. Standard US/Intl Format (No + sign, but uses parens or dashes)
+    # Examples: (555) 123-4567 | 555-123-4567
+    # We strictly look for parenthesis OR double dashes to avoid redacting dates like 2020-2024
+    us_phone_pattern = r'\(?\b\d{3}\)?[-. ]\d{3}[-. ]\d{4}\b'
+    text = re.sub(us_phone_pattern, '[PHONE_REDACTED]', text)
+
+    # C. Singapore Local Format (Specific)
+    # Matches: 91234567, 8123 4567, 6123-4567 (Starts with 6, 8, or 9)
+    sg_phone_pattern = r'\b[689]\d{3}[- ]?\d{4}\b'
+    text = re.sub(sg_phone_pattern, '[PHONE_REDACTED]', text)
+
+    # --- 4. SINGAPORE ADDRESSES ---
+    # A. Postal Codes (6 digits, boundary check to avoid matching random large numbers)
+    # Often preceded by "Singapore" or "S("
+    text = re.sub(r'(?i)(Singapore|S\(?)\s*\d{6}\)?', '[POSTAL_CODE]', text)
+    # Fallback: strict 6 digits at word boundary
+    text = re.sub(r'\b\d{6}\b', '[POSTAL_CODE]', text)
+
     # B. Unit Numbers (e.g., #04-123)
     text = re.sub(r'#\d{1,4}-\d{1,5}', '[UNIT_NO]', text)
     
-    # C. HDB Block Numbers (e.g., Blk 123, Block 10A)
+    # C. Block Numbers
     text = re.sub(r'\b(Blk|Block)\s*\d+[A-Za-z]?\b', '[BLOCK_NO]', text, flags=re.IGNORECASE)
 
-    # 4. NAMES (Heuristic Approach)
-    # A. Explicit labels like "Name: John Doe"
+    # --- 5. NAMES (Heuristic) ---
+    # A. Explicit labels
     text = re.sub(r'(?i)(Name|Candidate):\s*([A-Z][a-z]+ [A-Z][a-z]+)', r'\1: [NAME_REDACTED]', text)
+
+    # --- 6. FINANCIAL DATA (Credit Cards) ---
+    # Matches 13-19 digits, with optional dashes or spaces
+    # Examples: 4111 1234 5678 9010 | 4111-1234-5678-9010
+    cc_pattern = r'\b(?:\d[ -]*?){13,19}\b'
+    text = re.sub(cc_pattern, '[CREDIT_CARD_REDACTED]', text)
+
+    # --- 7. SINGAPORE UEN (Company Reg No) ---
+    # Invoices often have UENs (e.g., 200812345M). 
+    # We redact this to genericize company data.
+    text = re.sub(r'\b\d{9,10}[A-Za-z]\b', '[UEN_REDACTED]', text)
+
+    # --- 8. DEMOGRAPHICS (Anti-Bias) --- (NEW) ⚖️
+    # Removes Race, Religion, Nationality, Marital Status
+    # Matches: "Race: Chinese", "Nationality: Singaporean"
+    demographics_pattern = r'(?i)(Race|Religion|Nationality|Marital Status|Gender)\s*[:\-]\s*\w+'
+    text = re.sub(demographics_pattern, '[DEMOGRAPHIC_REDACTED]', text)
+
+    # --- 9. DATE OF BIRTH --- (NEW) 🎂
+    # Matches: "DOB: 01/01/1990", "Date of Birth: 12 Dec 1990"
+    dob_pattern = r'(?i)(Date of Birth|DOB|Born)\s*[:\-]?\s*.*?(?=\n|$)'
+    text = re.sub(dob_pattern, '[DOB_REDACTED]', text)
+
+    # --- 10. BANK ACCOUNT NUMBERS (Context-Aware) ---
+    # Looks for keywords like "Account No", "A/C", "POSB", "DBS", "OCBC", "UOB"
+    # Followed by 7-15 digits (with optional dashes/spaces)
+    bank_acct_pattern = r'(?i)(Account|A/C|Acc|POSB|DBS|OCBC|UOB|UB)\W*[:\.]?\W*(\d[\d\s-]{6,15})'
+    # We replace the number part (group 2) while keeping the label for context
+    text = re.sub(bank_acct_pattern, r'\1 [BANK_ACCT_REDACTED]', text)
+
+    # --- 11. CURRENCY & SALARY ---
+    # Matches: $5000, $ 1,234.50, SGD 500, S$5000
+    # Logic: Symbol/Code + optional space + digits + optional commas/decimals
+    currency_pattern = r'(?i)(SGD|S\$|\$)\s?[\d,]+(?:\.\d{2})?'
+    text = re.sub(currency_pattern, '[MONEY_REDACTED]', text)
 
     # B. The "Header" Assumption:
     # On most resumes, the first non-empty line is the Name. 
