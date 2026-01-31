@@ -52,12 +52,7 @@ async def upload_resume(file: UploadFile = File(...)):
         is_attack, guard_usage = GuardrailService.detect_jailbreak(text[:2000])
 
         if is_attack:
-            safe_evidence = parsers.redact_pii(text[:2000])
-            
-            logger.warning("⛔ JAILBREAK DETECTED")
             logger.warning(f"⛔ Jailbreak Detected in uploaded file: {file.filename}")
-            logger.warning(f"📝 Evidence (Sanitized):\n{safe_evidence}")
-            
             raise HTTPException(status_code=400, detail="Malicious content detected in file.")
         
         if guard_usage:

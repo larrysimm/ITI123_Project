@@ -42,7 +42,11 @@ class GuardrailService:
             is_jailbreak = result.get("is_jailbreak", False)
 
             if is_jailbreak and score > 0.8:
-                logger.warning(f"🚨 JAILBREAK SIGNAL (Score: {score})")
+                logger.warning("🚨 JAILBREAK BLOCKED", extra={
+                    "user_input": user_input, 
+                    "score": score,
+                    "type": "Adversarial Defense"
+                })
                 return True, usage_stats # Return BOTH result and usage
             
             return False, usage_stats
