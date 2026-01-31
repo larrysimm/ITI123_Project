@@ -87,7 +87,7 @@ def redact_pii(text: str) -> str:
     # B. Standard US/Intl Format (No + sign, but uses parens or dashes)
     # Examples: (555) 123-4567 | 555-123-4567
     # We strictly look for parenthesis OR double dashes to avoid redacting dates like 2020-2024
-    us_phone_pattern = r'\(?\b\d{3}\)?[-. ]\d{3}[-. ]\d{4}\b'
+    us_phone_pattern = r'(?:\(\d{3}\)|\d{3})[-. ]\d{3}[-. ]\d{4}'
     text = re.sub(us_phone_pattern, '[PHONE_REDACTED]', text)
 
     # C. Singapore Local Format (Specific)
