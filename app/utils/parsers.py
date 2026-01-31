@@ -63,7 +63,8 @@ def redact_pii(text: str) -> str:
     # --- 2. EMAILS & LINKS ---
     text = re.sub(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '[EMAIL_REDACTED]', text)
     # Remove LinkedIn/GitHub URLs (which often contain names)
-    text = re.sub(r'https?://(www\.)?(linkedin\.com|github\.com)/[A-Za-z0-9_\-/]+', '[LINK_REDACTED]', text)
+    link_pattern = r'(?:https?://)?(?:www\.)?(?:linkedin\.com|github\.com)/[\w\-\./]+'
+    text = re.sub(link_pattern, '[LINK_REDACTED]', text, flags=re.IGNORECASE)
 
     # --- 3. TELEPHONE NUMBERS (Robust Global & SG) ---
     
