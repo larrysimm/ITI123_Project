@@ -80,7 +80,7 @@ async def upload_resume(file: UploadFile = File(...)):
             logger.warning(f"⛔ AI Rejected Resume: {reason}")
             raise HTTPException(
                 status_code=400, 
-                detail=f"Uploaded file does not appear to be a resume. AI says: {reason}"
+                detail=f"Uploaded file does not appear to be a resume.\nValidation Analysis:\n{reason}"
             )
         
         logger.info("✅ AI confirmed document is a valid resume.")
@@ -88,7 +88,7 @@ async def upload_resume(file: UploadFile = File(...)):
         return {
             "filename": file.filename, 
             "status": "success",
-            "extracted_text": text[:10000] # Truncate for response
+            "extracted_text": safety_text[:10000] # Truncate for response
         }
 
     except HTTPException as he:

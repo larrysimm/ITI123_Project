@@ -46,47 +46,92 @@ def extract_clean_json(text: str) -> dict:
         logger.error(f"Bad JSON String: {json_str[:500]}...")
         return None
 
+import re
+
 def redact_pii(text: str) -> str:
     """
-    Aggressively removes PII (Email, Phone, Address, Name) 
+    Robustly removes PII (NRIC, Email, Intl Phones, Address, Name, Links)
     before sending data to the AI.
     """
-    if not text: return ""
+    if not text: 
+        return ""
 
-    # 1. EMAILS
+    # --- 1. SENSITIVE IDs (Singapore NRIC/FIN) ---
+    # Matches: S1234567A, T1234567Z, F1234567N, G1234567X (Case insensitive)
+    text = re.sub(r'\b[S|T|F|G]\d{7}[A-Z]\b', '[NRIC_REDACTED]', text, flags=re.IGNORECASE)
+
+    # --- 2. EMAILS & LINKS ---
     text = re.sub(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '[EMAIL_REDACTED]', text)
-    
-    # 2. PHONE NUMBERS (SG 8-digit & Intl formats)
-    # Matches: 91234567, (+65) 91234567, 65-9123-4567
-    text = re.sub(r'(?:\+?65[- ]?)?[689]\d{3}[- ]?\d{4}\b', '[PHONE_REDACTED]', text)
+    # Remove LinkedIn/GitHub URLs (which often contain names)
+    text = re.sub(r'https?://(www\.)?(linkedin\.com|github\.com)/[A-Za-z0-9_\-/]+', '[LINK_REDACTED]', text)
 
-    # 3. SINGAPORE ADDRESSES (The "Fingerprint")
-    # A. Postal Codes (6 digits, often appearing as "Singapore 123456" or just "123456")
-    text = re.sub(r'\b(?:Singapore\s*)?\d{6}\b', '[POSTAL_CODE]', text)
+    # --- 3. TELEPHONE NUMBERS (Robust Global & SG) ---
     
+    # A. International Format (Starts with + or 00)
+    # Examples: +1-202-555-0123 | +44 (0) 20 1234 5678 | +65 9123 4567
+    # Logic: Look for +, then 1-3 digit country code, then groupings of digits/spaces/dashes
+    intl_phone_pattern = r'(?:\+|00)\d{1,3}[-. ]?\(?\d{1,4}\)?[-. ]?\d{3,}[-. ]?\d{3,}'
+    text = re.sub(intl_phone_pattern, '[PHONE_REDACTED]', text)
+
+    # B. Standard US/Intl Format (No + sign, but uses parens or dashes)
+    # Examples: (555) 123-4567 | 555-123-4567
+    # We strictly look for parenthesis OR double dashes to avoid redacting dates like 2020-2024
+    us_phone_pattern = r'\(?\b\d{3}\)?[-. ]\d{3}[-. ]\d{4}\b'
+    text = re.sub(us_phone_pattern, '[PHONE_REDACTED]', text)
+
+    # C. Singapore Local Format (Specific)
+    # Matches: 91234567, 8123 4567, 6123-4567 (Starts with 6, 8, or 9)
+    sg_phone_pattern = r'\b[689]\d{3}[- ]?\d{4}\b'
+    text = re.sub(sg_phone_pattern, '[PHONE_REDACTED]', text)
+
+    # --- 4. SINGAPORE ADDRESSES ---
+    # A. Postal Codes (6 digits, boundary check to avoid matching random large numbers)
+    # Often preceded by "Singapore" or "S("
+    text = re.sub(r'(?i)(Singapore|S\(?)\s*\d{6}\)?', '[POSTAL_CODE]', text)
+    # Fallback: strict 6 digits at word boundary
+    text = re.sub(r'\b\d{6}\b', '[POSTAL_CODE]', text)
+
     # B. Unit Numbers (e.g., #04-123)
     text = re.sub(r'#\d{1,4}-\d{1,5}', '[UNIT_NO]', text)
     
-    # C. HDB Block Numbers (e.g., Blk 123, Block 10A)
+    # C. Block Numbers
     text = re.sub(r'\b(Blk|Block)\s*\d+[A-Za-z]?\b', '[BLOCK_NO]', text, flags=re.IGNORECASE)
 
-    # 4. NAMES (Heuristic Approach)
-    # A. Explicit labels like "Name: John Doe"
+    # --- 5. NAMES (Heuristic) ---
+    # A. Explicit labels
     text = re.sub(r'(?i)(Name|Candidate):\s*([A-Z][a-z]+ [A-Z][a-z]+)', r'\1: [NAME_REDACTED]', text)
 
-    # B. The "Header" Assumption:
-    # On most resumes, the first non-empty line is the Name. 
-    # If the first line is short (< 30 chars) and capitalized, redact it.
+    # B. Header Analysis
     lines = text.split('\n')
-    for i in range(len(lines)):
-        line = lines[i].strip()
-        if line:
-            # If line is short and looks like a name (mostly letters, no weird symbols)
-            if len(line) < 30 and re.match(r'^[A-Za-z \.]+$', line):
-                 lines[i] = "[NAME_REDACTED_HEADER]"
-            break # Only try to redact the first valid line
+    processed_lines = []
+    
+    header_redacted = False
+    for i, line in enumerate(lines):
+        clean_line = line.strip()
+        
+        # Skip empty lines
+        if not clean_line:
+            processed_lines.append(line)
+            continue
             
-    return "\n".join(lines)
+        # Stop heuristic if we hit a section header (Resume, Education, Experience)
+        if re.match(r'(?i)^(summary|experience|education|objective|skills|profile)', clean_line):
+            header_redacted = True # Stop trying to find names
+        
+        # Attempt to redact Name at the very top (First non-empty line)
+        if not header_redacted:
+            # Check if line is short (name-like) and not a common header word
+            is_name_like = (len(clean_line) < 30) and re.match(r'^[A-Za-z \.\'-]+$', clean_line)
+            is_not_header = not re.match(r'(?i)^(resume|cv|curriculum vitae)$', clean_line)
+            
+            if is_name_like and is_not_header:
+                processed_lines.append("[NAME_REDACTED_HEADER]")
+                header_redacted = True # Assume we found it, stop looking
+                continue
+        
+        processed_lines.append(line)
+
+    return "\n".join(processed_lines)
 
 def parse_json_safely(text: str) -> dict:
     """
