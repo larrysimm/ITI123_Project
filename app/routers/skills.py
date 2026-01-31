@@ -88,7 +88,7 @@ async def upload_resume(file: UploadFile = File(...)):
         return {
             "filename": file.filename, 
             "status": "success",
-            "extracted_text": text[:10000] # Truncate for response
+            "extracted_text": safety_text # Truncate for response
         }
 
     except HTTPException as he:
