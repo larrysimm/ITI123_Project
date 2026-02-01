@@ -72,7 +72,7 @@ async def log_visits(request: Request, call_next):
     process_time = time.time() - start_time
     
     # Filter out noise
-    if request.url.path not in ["/favicon.ico", "/openapi.json", "/docs"]:
+    if request.url.path not in ["/favicon.ico", "/openapi.json", "/docs"] and request.method != "OPTIONS":
         log_data = {
             "event": "api_hit",
             "method": request.method,
