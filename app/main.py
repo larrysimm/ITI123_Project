@@ -1,5 +1,3 @@
-import logging
-import os
 import time
 
 from dotenv import load_dotenv
@@ -11,19 +9,6 @@ from app.db import initialize
 from app.core.config import settings, logger
 from app.services import ai_service
 from app.routers import interview, skills, audio
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-logtail_token = os.getenv("LOGTAIL_SOURCE_TOKEN")
-
-if logtail_token:
-    console_handler = logging.StreamHandler()
-    logger.addHandler(console_handler)
-    logger.info("✅ Logger initialized in main.py")
-else:
-    console_handler = logging.StreamHandler()
-    logger.addHandler(console_handler)
-    logger.info("⚠️ Logger initialized without Better Stack in main.py")
 
 load_dotenv()
 app = FastAPI(title="Poly-to-Pro", version="3.0.0")
@@ -82,32 +67,22 @@ async def verify_secret_header(request: Request, call_next):
 async def log_visits(request: Request, call_next):
     start_time = time.time()
     
-    # Process the request
     response = await call_next(request)
     
-    # Calculate duration
     process_time = time.time() - start_time
     
-    # Define which paths to ignore (noise filter)
-    ignored_paths = ["/favicon.ico", "/openapi.json"]
-    
-    # Only log if it's NOT in the ignored list
-    if request.url.path not in ignored_paths:
-        
-        # Prepare structured data for Better Stack
+    # Filter out noise
+    if request.url.path not in ["/favicon.ico", "/openapi.json", "/docs"]:
         log_data = {
             "event": "api_hit",
             "method": request.method,
             "path": request.url.path,
             "status": response.status_code,
-            "ip": request.client.host,
-            "duration_seconds": round(process_time, 4),
-            "user_agent": request.headers.get("user-agent", "unknown")
+            "duration": round(process_time, 4),
+            "ip": request.client.host
         }
-        
-        # Log it! (This sends JSON to Better Stack)
-        # We use the 'extra' parameter to send searchable JSON fields
-        logger.info(f"API Request: {request.method} {request.url.path}", extra=log_data)
+        # Send JSON data to Better Stack
+        logger.info(f"API Request: {request.url.path}", extra=log_data)
         
     return response
 
