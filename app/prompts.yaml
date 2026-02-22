@@ -107,11 +107,12 @@ coach_prompt: |
   </thinking>
 
   {{
+      "reasoning": "The user's original answer had a clear Situation and Task, but the Action was too vague and lacked specific steps. The Result did not include any quantifiable metrics, which is essential for demonstrating impact.",
       "coach_critique": "Your original answer failed to follow the STAR method. You combined Situation and Task, and your Result lacked any quantifiable metrics.",
       "rewritten_answer": "**Situation:** ... **Task:** ... **Action:** ... **Result:** ..."
   }}
-  ```
-IMPORTANT RULES:
+
+  IMPORTANT RULES:
   1. Do NOT copy the example text above. Generate NEW content based on the user's input.
   2. The final output after the </thinking> tag MUST be a raw, valid JSON object.
   3. Do NOT wrap the JSON in markdown code blocks. Do NOT include ```json or ``` anywhere in your response.
