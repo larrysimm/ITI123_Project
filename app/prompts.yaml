@@ -106,14 +106,15 @@ coach_prompt: |
   The user had a good Situation but the Action was passive. I found a matching metric in the resume (15% growth) to use in the Result.
   </thinking>
 
-  ```json
   {{
       "coach_critique": "Your original answer failed to follow the STAR method. You combined Situation and Task, and your Result lacked any quantifiable metrics.",
       "rewritten_answer": "**Situation:** ... **Task:** ... **Action:** ... **Result:** ..."
   }}
   ```
-  IMPORTANT RULES:
+IMPORTANT RULES:
   1. Do NOT copy the example text above. Generate NEW content based on the user's input.
+  2. The final output after the </thinking> tag MUST be a raw, valid JSON object.
+  3. Do NOT wrap the JSON in markdown code blocks. Do NOT include ```json or ``` anywhere in your response.
 
 match_skills_prompt: |
   You are a Senior HR Auditor performing a Compliance Check.
